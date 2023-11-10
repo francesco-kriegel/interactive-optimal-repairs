@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?eclipse version="3.0"?>
+
+<plugin>
+  <extension id="InteractiveOptimalRepairTab" point="org.protege.editor.core.application.WorkspaceTab">
+    <label value="Interactive Optimal Repair"/>
+    <class value="de.tu_dresden.inf.lat.interactive_optimal_repairs.InteractiveOptimalRepairTab"/>
+    <index value="Y"/>
+    <editorKitId value="OWLEditorKit"/>
+    <defaultViewConfigFileName value="viewconfig-InteractiveOptimalRepairTab.xml"/>
+  </extension>
+  <extension id="InteractiveOptimalRepairViewComponent" point="org.protege.editor.core.application.ViewComponent">
+    <label value="Interactive Optimal Repair" />
+    <class value="de.tu_dresden.inf.lat.interactive_optimal_repairs.InteractiveOptimalRepairViewComponent" />
+    <headerColor value="@org.protege.ontologycolor"/>
+    <category value="@org.protege.ontologycategory" />
+  </extension>
+</plugin>

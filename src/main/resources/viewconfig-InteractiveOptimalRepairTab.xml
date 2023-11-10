@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<layout>
+    <VSNode splits="1.0">
+        <HSNode splits="1.0">
+<!--        <HSNode splits="0.5 0.5">-->
+<!--            <CNode>-->
+<!--                <Component label="Axioms">-->
+<!--                    <Property id="pluginId" value="org.coode.change.AxiomsView"/>-->
+<!--                </Component>-->
+<!--            </CNode>-->
+            <CNode>
+                <Component label="Interactive Optimal Repair">
+                    <Property id="pluginId" value="interactive-optimal-repairs.InteractiveOptimalRepairViewComponent"/>
+                </Component>
+            </CNode>
+        </HSNode>
+    </VSNode>
+</layout>
