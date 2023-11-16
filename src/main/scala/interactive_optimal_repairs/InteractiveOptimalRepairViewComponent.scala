@@ -3,7 +3,7 @@ package interactive_optimal_repairs
 
 import interactive_optimal_repairs.Answer.*
 import protege_components.Util.*
-import protege_components.{OrderedOWLAxiomList, OrderedOWLAxiomListFrameSectionRow, ProtegeWorker, TextMListButton}
+import protege_components.{OrderedOWLAxiomList, OrderedOWLAxiomListFrameSectionRow, TextMListButton}
 
 import org.protege.editor.core.ui.list.MListButton
 import org.protege.editor.owl.OWLEditorKit
@@ -20,9 +20,10 @@ import javax.swing.*
 import scala.jdk.StreamConverters.*
 import scala.reflect.ClassTag
 
+import protege_components.ProtegeWorker.*
+
 class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 
-  private val activeWorkers = collection.mutable.ListBuffer[ProtegeWorker[_, Void]]()
   private val classTag_OrderedOWLAxiomListFrameSectionRow_Query = implicitly[ClassTag[OrderedOWLAxiomListFrameSectionRow[Query]]]
 
   protected def initialiseOWLView(): Unit = {
@@ -326,35 +327,6 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
         dialog.setVisible(true)
       }
     }
-  }
-
-  private object nextInt {
-    private[this] var n = 0
-    def apply() = { n += 1; n }
-  }
-
-  private def asynchronouslyInNewWorker[T](code: => T): ProtegeWorker[T, Void] =
-    asynchronouslyInNewWorker("optimal-repair-worker-" + nextInt()) {
-      code
-    }
-
-  private def asynchronouslyInNewWorker[T](message: String)(code: => T): ProtegeWorker[T, Void] = {
-    val worker: ProtegeWorker[T, Void] = () => { code }
-    worker.message = message
-    activeWorkers += worker
-    worker.addPropertyChangeListener((evt: PropertyChangeEvent) => {
-      if evt.getPropertyName eq "state" then
-        if evt.getNewValue.asInstanceOf[SwingWorker.StateValue] eq SwingWorker.StateValue.DONE then
-          activeWorkers.synchronized {
-            activeWorkers -= worker
-          }
-    })
-    worker
-  }
-
-  private def cancelActiveWorkers(): Unit = {
-    activeWorkers.foreach(_.cancel(true))
-    activeWorkers.clear()
   }
 
   protected def disposeOWLView(): Unit = {

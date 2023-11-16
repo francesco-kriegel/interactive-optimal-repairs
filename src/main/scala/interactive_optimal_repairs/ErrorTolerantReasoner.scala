@@ -16,9 +16,9 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration) {
     if queries.forall(configuration.ontologyReasoner.entails) then
       val subClassExpressions: collection.Set[OWLClassExpression] =
         queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
-          configuration.repairRequest.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
+          configuration.request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
       val reasoner: ELReasoner = ELReasoner(queries, subClassExpressions, true)
-      !configuration.repairRequest.axioms.exists(reasoner.entails)
+      !configuration.request.axioms.exists(reasoner.entails)
     else
       false
   }
@@ -47,7 +47,7 @@ class ErrorTolerantIQReasoner(using configuration: RepairConfiguration) extends 
       } then
         val individuals = queries.collect { case ClassAssertion(_, _, individual) => individual.asOWLNamedIndividual() }
         individuals.map { individual =>
-          val minimalRepairTypes = RepairTypes.computeAllMinimalRepairTypes(individual, configuration.repairRequest.getClassExpressions(individual))
+          val minimalRepairTypes = RepairType.computeAllMinimalRepairTypes(individual, configuration.request.getClassExpressions(individual))
           val denominator = minimalRepairTypes.size
           val numerator = minimalRepairTypes.count { repairType =>
             queries.forall {

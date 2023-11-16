@@ -7,7 +7,7 @@ import org.protege.editor.core.ui.progress.BackgroundTask
 import java.beans.PropertyChangeEvent
 import javax.swing.SwingWorker
 
-abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with BackgroundTask {
+private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with BackgroundTask {
 
   this.addPropertyChangeListener((evt: PropertyChangeEvent) => {
     if evt.getPropertyName eq "state" then
@@ -47,6 +47,41 @@ abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with BackgroundTask
       other.execute()
       (_this.get(), other.get())
     }
+  }
+
+}
+
+object ProtegeWorker {
+
+  private val activeWorkers = collection.mutable.ListBuffer[ProtegeWorker[_, Void]]()
+
+  private object nextInt {
+    private[this] var n = 0
+    def apply() = { n += 1; n }
+  }
+
+  def asynchronouslyInNewWorker[T](code: => T): ProtegeWorker[T, Void] =
+    asynchronouslyInNewWorker("interactive-optimal-repair-worker-" + nextInt()) {
+      code
+    }
+
+  def asynchronouslyInNewWorker[T](message: String)(code: => T): ProtegeWorker[T, Void] = {
+    val worker: ProtegeWorker[T, Void] = () => { code }
+    worker.message = message
+    activeWorkers += worker
+    worker.addPropertyChangeListener((evt: PropertyChangeEvent) => {
+      if evt.getPropertyName eq "state" then
+        if evt.getNewValue.asInstanceOf[SwingWorker.StateValue] eq SwingWorker.StateValue.DONE then
+          activeWorkers.synchronized {
+            activeWorkers -= worker
+          }
+    })
+    worker
+  }
+
+  def cancelActiveWorkers(): Unit = {
+    activeWorkers.foreach(_.cancel(true))
+    activeWorkers.clear()
   }
 
 }

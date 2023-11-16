@@ -1,10 +1,11 @@
 package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
+import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
 
 import org.phenoscape.scowl.*
-import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLClassExpression, OWLNamedIndividual}
+import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLClassExpression, OWLIndividual, OWLNamedIndividual, OWLObjectProperty, OWLObjectPropertyAssertionAxiom}
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
@@ -36,99 +37,119 @@ abstract class UserInteraction()(using configuration: RepairConfiguration) {
 /* This strategy is described in the JELIA 2023 paper. */
 class FastUserInteraction()(using configuration: RepairConfiguration) extends UserInteraction() {
 
-//  val individuals = configuration.ontologyReasoner.instances(OWLThing)
-//
-//  val types = mutable.HashMap[OWLNamedIndividual, collection.Set[OWLClassExpression]]()
-//  def getTypes(individual: OWLNamedIndividual): collection.Set[OWLClassExpression] =
-//    types.getOrElseUpdate(individual, { configuration.ontologyReasoner.types(individual).toSet })
-//
-//  val preservedRoleAssertions = mutable.HashSet[OWLObjectPropertyAssertionAxiom]()
-//  configuration.axioms.foreach({ case 𝛂 @ ObjectPropertyAssertion(_, _, _: OWLNamedIndividual, _: OWLNamedIndividual) => preservedRoleAssertions.add(𝛂); case _ => {} })
-//
-//  val forbiddenTypesInTheRepair = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
-//  def addForbiddenType(individual: OWLNamedIndividual, classExpression: OWLClassExpression): Unit =
-//    forbiddenTypesInTheRepair.getOrElseUpdate(individual, { mutable.HashSet[OWLClassExpression]() }).add(classExpression)
-//  def addForbiddenTypes(individual: OWLNamedIndividual, classExpressions: Iterable[OWLClassExpression]): Unit =
-//    forbiddenTypesInTheRepair.getOrElseUpdate(individual, { mutable.HashSet[OWLClassExpression]() }).addAll(classExpressions)
-//  individuals.foreach { individual =>
-//    addForbiddenTypes(individual, configuration.repairRequest.getClassExpressions(individual) intersect getTypes(individual))
-//  }
-//
-//  // construct sets of questions, of which the user must decline at least (accepting all would be an error).
-//  // for an undecided conjunction C for individual a, take all assertions D(a) where D is tlc of C
-//  // for an existential restriction ∃r.C for individual a and an undecided role assertion r(a,b), take the assertions r(a,b) and C(b)
-//
-//  forbiddenTypesInTheRepair.flatMap((individual, classExpressions) => classExpressions.map((individual, _)))
-//    .filter { (individual, classExpression) =>
-//      !classExpression.isAtom && !(classExpression isCoveredBy forbiddenTypesInTheRepair(individual).filter(_.isAtom) wrt configuration.trivialReasoner)
-//    }
-//
-//  preservedRoleAssertions.flatMap {
-//    case ObjectPropertyAssertion(_, property, subject: OWLNamedIndividual, target: OWLNamedIndividual) =>
-//      forbiddenTypesInTheRepair(subject) collectFirst {
-//          case ObjectSomeValuesFrom(qroperty, classExpression) if (property equals qroperty) && !(classExpression isCoveredBy forbiddenTypesInTheRepair(target).filter(_.isAtom) wrt configuration.trivialReasoner)
-//            => (property, subject, target, classExpression)
-//        }
-//  }
-//
-  private val _repairSeed = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
-  private val pendingQueries = mutable.HashMap[Query, mutable.HashSet[Query]]()
+  private val repairSeed = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
+  private val nonDeclinedRoleAssertions = mutable.HashSet[OWLObjectPropertyAssertionAxiom]()
+  private val pendingQueries_Conjunction = mutable.HashMap[OWLClassAssertionAxiom, mutable.HashSet[OWLClassAssertionAxiom]]()
+              // contains entries a:C₁⊓...⊓Cₙ ⟼ a:C₁ | ... | a:Cₙ
+  private val pendingQueries_ExistentialRestriction = mutable.HashMap[(OWLIndividual, OWLObjectProperty, OWLIndividual, OWLClassExpression), (OWLObjectPropertyAssertionAxiom, OWLClassAssertionAxiom)]()
+              // contains entries (a,r,b,C) ⟼ (a,b):r | b:C
   private val isCurrentlyProcessing = AtomicInteger(0)
 
   private def processDeclinedQueries(queries: Iterable[Query]): Unit = {
-    val undecidedQueries = mutable.HashSet[Query]()
+    val undecidedQueries_Conjunction = mutable.HashSet[OWLClassAssertionAxiom]()
+    val undecidedQueries_ExistentialRestriction = mutable.HashSet[OWLClassAssertionAxiom]()
     @tailrec def recursivelyProcess(qs: Iterable[Query]): Unit = {
       val ps = mutable.HashSet[Query]()
       qs.foreach {
-        case ass @ ClassAssertion(_, classExpression, individual) =>
+        case classAssertion @ ClassAssertion(_, classExpression, individual) =>
           if classExpression.isAtom then
-            _repairSeed.getOrElseUpdate(individual.asOWLNamedIndividual(), { mutable.HashSet[OWLClassExpression]() }).add(classExpression)
-            val implicitlyAnsweredQueries =
-              pendingQueries.keySet filter {
+            repairSeed.getOrElseUpdate(individual.asOWLNamedIndividual(), { mutable.HashSet[OWLClassExpression]() }).add(classExpression)
+
+            val implicitlyAnsweredQueries_Conjunction =
+              pendingQueries_Conjunction.keySet filter {
                 case ClassAssertion(_, dlassExpression, jndividual) =>
                   (individual eq jndividual) && (dlassExpression isSubsumedBy classExpression wrt configuration.trivialReasoner)
                 case _ => ???
               }
-            val diff = pendingQueries.keySet diff implicitlyAnsweredQueries
-            val subQueriesToBeRetained = pendingQueries.flatMap((query, subQueries) => if diff contains query then subQueries else collection.Set.empty).toSet
-            implicitlyAnsweredQueries.foreach { pendingQueries(_).filterNot { subQueriesToBeRetained } foreach { user.removeQuestion } }
-            pendingQueries --= implicitlyAnsweredQueries
-            val premises =
-              (configuration.ontologyReasoner.premisesAmongSubsumees(classExpression)
-                intersect configuration.ontologyReasoner.types(individual)
-                filterNot { _ isCoveredBy _repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner }
-              ).toSet
-            ps ++= premises.map(individual Type _)
+            val diff_Conjunction = pendingQueries_Conjunction.keySet diff implicitlyAnsweredQueries_Conjunction
+            val subQueriesToBeRetained_Conjunction = pendingQueries_Conjunction.flatMap((query, subQueries) => if diff_Conjunction contains query then subQueries else collection.Set.empty).toSet
+            implicitlyAnsweredQueries_Conjunction.foreach { pendingQueries_Conjunction(_).filterNot { subQueriesToBeRetained_Conjunction } foreach { user.removeQuestion } }
+            pendingQueries_Conjunction --= implicitlyAnsweredQueries_Conjunction
+
+            val implicitlyAnsweredQueries_ExistentialRestriction =
+              pendingQueries_ExistentialRestriction.keySet filter {
+                case (_, _, target, filler) => (individual equals target) && (filler isSubsumedBy classExpression wrt configuration.trivialReasoner)
+              }
+            val diff_ExistentialRestriction = pendingQueries_ExistentialRestriction.keySet diff implicitlyAnsweredQueries_ExistentialRestriction
+            val subQueriesToBeRetained_ExistentialRestriction = pendingQueries_ExistentialRestriction.collect({ case (key, (roleAssertion, _)) if diff_ExistentialRestriction contains key => roleAssertion }).toSet[Query]
+            implicitlyAnsweredQueries_ExistentialRestriction.foreach { pendingQueries_ExistentialRestriction(_).productIterator.map(_.asInstanceOf[Query]).filterNot { subQueriesToBeRetained_ExistentialRestriction } foreach { user.removeQuestion } }
+            pendingQueries_ExistentialRestriction --= implicitlyAnsweredQueries_ExistentialRestriction
+
+            ps ++=
+              premises(individual, classExpression) filterNot {
+                _ isCoveredBy repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner
+              } map { individual Type _ }
+            classExpression match
+              case ObjectSomeValuesFrom(_, _) =>
+                undecidedQueries_ExistentialRestriction += classAssertion
+              case _ => // Do nothing.
           else
-            undecidedQueries += ass
-        case _ => // Do nothing.
+            undecidedQueries_Conjunction += classAssertion
+        case roleAssertion @ ObjectPropertyAssertion(_, _, _, _) =>
+          nonDeclinedRoleAssertions -= roleAssertion
+          pendingQueries_ExistentialRestriction filter {
+            case (_, (soleAssertion, _)) => roleAssertion equals soleAssertion
+          } foreach {
+          case (key, (roleAssertion, classAssertion)) =>
+            user.removeQuestion(roleAssertion)
+            user.removeQuestion(classAssertion)
+            pendingQueries_ExistentialRestriction -= key
+          }
+        case _ =>
+          throw IllegalArgumentException("Unsupported query occurred in fast user interaction.")
       }
       if ps.nonEmpty then recursivelyProcess(ps)
     }
     recursivelyProcess(queries)
-    undecidedQueries --= pendingQueries.keySet
-    undecidedQueries.filterInPlace {
+
+    undecidedQueries_Conjunction --= pendingQueries_Conjunction.keySet
+    undecidedQueries_Conjunction.filterInPlace {
       case ClassAssertion(_, classExpression, individual) =>
-        !(classExpression isCoveredBy _repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner)
+        !(classExpression isCoveredBy repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner)
       case _ => ???
     }
-    undecidedQueries.foreach {
-      case ass @ ClassAssertion(_, classExpression, individual) =>
-        pendingQueries(ass) = mutable.HashSet[Query]()
-        classExpression.topLevelConjuncts().foreach { atom => pendingQueries(ass) += (individual Type atom) }
-        pendingQueries(ass).foreach { user.showQuestion }
+    undecidedQueries_Conjunction.foreach {
+      case assertion @ ClassAssertion(_, classExpression, individual) =>
+        pendingQueries_Conjunction(assertion) = mutable.HashSet[OWLClassAssertionAxiom]()
+        classExpression.topLevelConjuncts().foreach { atom => pendingQueries_Conjunction(assertion) += (individual Type atom) }
+        pendingQueries_Conjunction(assertion).foreach { user.showQuestion }
+      case _ => ???
+    }
+
+    undecidedQueries_ExistentialRestriction.foreach {
+      case ClassAssertion(_, ObjectSomeValuesFrom(property @ ObjectProperty(_), filler), individual) =>
+        nonDeclinedRoleAssertions.foreach {
+          case roleAssertion @ ObjectPropertyAssertion(_, qroperty, subject, target)
+            if (property equals qroperty)
+              && (individual equals subject)
+              && !(pendingQueries_ExistentialRestriction contains (individual, property, target, filler))
+              && !(filler isCoveredBy repairSeed.getOrElse(target.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner) =>
+            val classAssertion = target Type filler
+            pendingQueries_ExistentialRestriction((individual, property, target, filler)) = (roleAssertion, classAssertion)
+            user.showQuestion(roleAssertion)
+            user.showQuestion(classAssertion)
+          case _ => // Do nothing.
+        }
       case _ => ???
     }
   }
 
   override protected def start(): Unit = {
-    processDeclinedQueries(configuration.repairRequest.axioms.filter { configuration.ontologyReasoner.entails })
+    configuration.axioms.foreach {
+      case roleAssertion: OWLObjectPropertyAssertionAxiom => nonDeclinedRoleAssertions += roleAssertion
+      case _ => // Do nothing.
+    }
+    processDeclinedQueries(configuration.request.axioms.filter { configuration.ontologyReasoner.entails })
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
     isCurrentlyProcessing.incrementAndGet()
     user.removeQuestion(query)
-    pendingQueries -= query
+    // query match
+    //   case query: OWLClassAssertionAxiom =>
+    //     pendingQueries_Conjunction -= query
+    //   case query: OWLObjectPropertyAssertionAxiom =>
+    //     // TODO
     answer match
       case Answer.DECLINE => processDeclinedQueries(Iterable.single(query))
       case _ => ??? // Should never occur.
@@ -136,11 +157,11 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
   }
 
   override def hasBeenCompleted(): Boolean = {
-    isCurrentlyProcessing.get() == 0 && pendingQueries.isEmpty
+    isCurrentlyProcessing.get() == 0 && pendingQueries_Conjunction.isEmpty && pendingQueries_ExistentialRestriction.isEmpty
   }
 
   override def getRepairSeed(): RepairSeed = {
-    val axioms = _repairSeed.flatMap((individual, atoms) => atoms.map(atom => individual Type atom))
+    val axioms = repairSeed.flatMap((individual, atoms) => atoms.map(atom => individual Type atom))
     RepairSeed(true, axioms.toSeq: _*)
   }
 
@@ -169,7 +190,7 @@ class BestUserInteraction()(using configuration: RepairConfiguration) extends Us
   val individuals = configuration.ontologyReasoner.instances(OWLThing)
   val atomicClassAssertions = individuals.flatMap(individual => configuration.ontologyReasoner.types(individual).filter(_.isAtom).map(atom => individual Type atom))
   val repairTemplate = mutable.HashSet[Query]()
-  val particularizedRepairRequest = mutable.HashSet.from(configuration.repairRequest.axioms)
+  val particularizedRepairRequest = mutable.HashSet.from(configuration.request.axioms)
   val tboxAxioms = configuration.axioms.filter({ case SubClassOf(_, _, _) => true; case _ => false })
   val templateReasoner = ELReasoner(tboxAxioms, configuration.subClassExpressions, false)
 

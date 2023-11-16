@@ -26,7 +26,7 @@ package protege_components
 import java.awt.event.ActionListener
 import java.awt.{BorderLayout, GridBagConstraints, Insets}
 import java.lang.reflect.InvocationTargetException
-import javax.swing.{AbstractButton, JLabel, JPanel, SwingConstants, SwingUtilities}
+import javax.swing.*
 
 object Util {
 

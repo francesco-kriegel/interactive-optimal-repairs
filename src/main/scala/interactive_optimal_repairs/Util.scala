@@ -6,8 +6,8 @@ import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
 
+import scala.jdk.CollectionConverters.*
 import scala.jdk.StreamConverters.*
-import scala.jdk.CollectionConverters._
 
 object Util {
 
@@ -45,6 +45,16 @@ object Util {
         case ObjectSomeValuesFrom(_, _) => true
         case ObjectHasValue(_, _@NamedIndividual(_)) => true
         case ObjectOneOf(individuals) if (individuals.size == 1) && (individuals.head.isNamed) => true
+        case _ => false
+
+    lazy val isClass: Boolean =
+      classExpression match
+        case c@Class(_) => !(c equals OWLThing)
+        case _ => false
+
+    lazy val isObjectSomeValuesFrom: Boolean =
+      classExpression match
+        case ObjectSomeValuesFrom(_, _) => true
         case _ => false
 
     def topLevelConjuncts(): LazyList[OWLClassExpression] =

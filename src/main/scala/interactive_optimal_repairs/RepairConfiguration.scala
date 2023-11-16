@@ -7,11 +7,11 @@ import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLClassExpression,
 
 import scala.jdk.StreamConverters.*
 
-class RepairConfiguration(val axioms: collection.Set[OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom], val repairRequest: RepairRequest) {
+class RepairConfiguration(val axioms: collection.Set[OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom], val request: RepairRequest) {
 
   val subClassExpressions: collection.Set[OWLClassExpression] =
     axioms.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
-      repairRequest.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList)) // concat
+      request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList)) // concat
       // repairRequest.axioms.collect {
       //   case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
       //     collection.Set(oneOf(target), property some oneOf(target))

@@ -18,6 +18,8 @@ import javax.swing.*
 import javax.swing.event.DocumentEvent
 import scala.reflect.ClassTag
 
+import protege_components.ProtegeWorker.*
+
 class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
                                                      rowLabel: String,
                                                      unexpectedAxiomException: () => OWLExpressionParserException = () => OWLExpressionParserException("Expected an OWL axiom", 0, 0, false, false, false, false, false, false, Collections.emptySet),
@@ -70,12 +72,20 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
       case _ => Collections.emptyList[MListButton]
   }
 
-  private var worker: Option[ProtegeWorker[Option[OWLException], Void]] = None
-  private def asynchronouslyInTheWorker(code: => Option[OWLException]): ProtegeWorker[Option[OWLException], Void] = {
-    worker.foreach(_.cancel(true))
-    val w: ProtegeWorker[Option[OWLException], Void] = () => { code }
-    worker = Some(w)
-    w
+//  private var worker: Option[ProtegeWorker[Option[OWLException], Void]] = None
+//  private def asynchronouslyInTheWorker(code: => Option[OWLException]): ProtegeWorker[Option[OWLException], Void] = {
+//    worker.foreach(_.cancel(true))
+//    val w: ProtegeWorker[Option[OWLException], Void] = () => { code }
+//    worker = Some(w)
+//    w.message = "Checking whether the input is a well-formed query."
+//    w
+//  }
+  private var maybeWorker: Option[ProtegeWorker[_, Void]] = None
+  private def asynchronouslyInTheWorker[T](message: String)(code: => T): ProtegeWorker[T, Void] = {
+    maybeWorker.foreach(_.cancel(true))
+    val worker = asynchronouslyInNewWorker(message) { code }
+    maybeWorker = Some(worker)
+    worker
   }
 
   private def inputAxiom(initialValue: Ax | Null = null): Option[Ax] = {
@@ -129,7 +139,7 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
       unwantedConsequenceStatusLabel.setText("Please wait...")
       try {
         val axiom = unwantedConsequenceAxiomEditor.getEditedObject()
-        asynchronouslyInTheWorker {
+        asynchronouslyInTheWorker("Checking whether the input is a well-formed query.") {
           getOWLExceptionIfAxiomIsNotAllowed(axiom)
         } executeAndThen {
           maybeOWLException =>
@@ -214,7 +224,7 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
 
   override def dispose() = {
     axioms.clear()
-    worker.foreach(_.cancel(true))
+    maybeWorker.foreach(_.cancel(true))
     super.dispose()
   }
 

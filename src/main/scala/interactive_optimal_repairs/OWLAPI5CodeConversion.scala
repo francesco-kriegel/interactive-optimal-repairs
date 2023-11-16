@@ -3,7 +3,7 @@ package interactive_optimal_repairs
 
 import org.semanticweb.elk.owlapi.ElkReasoner
 import org.semanticweb.owlapi.model
-import org.semanticweb.owlapi.model.{OWLAxiom, OWLClass, OWLClassExpression, OWLIndividual, OWLNamedIndividual, OWLObject, OWLOntology}
+import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.{ChangeApplied, Imports}
 
 // Allows for code that looks like written for OWLAPI5

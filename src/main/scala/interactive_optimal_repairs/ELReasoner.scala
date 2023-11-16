@@ -2,8 +2,8 @@ package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
 import interactive_optimal_repairs.OWLAPI5CodeConversion.*
+import interactive_optimal_repairs.Util.Nominal
 
-import de.tu_dresden.inf.lat.interactive_optimal_repairs.Util.Nominal
 import org.phenoscape.scowl.*
 import org.semanticweb.elk.owlapi.ElkReasonerFactory
 import org.semanticweb.owlapi.apibinding.OWLManager
@@ -12,7 +12,6 @@ import org.semanticweb.owlapi.model.parameters.Imports
 
 import scala.collection.mutable
 import scala.jdk.StreamConverters.*
-import scala.jdk.CollectionConverters._
 
 /* This class encapsulates an instance of the ELK reasoner and provides methods with which the reasoning results can be accessed
 * in a controlled manner and especially for OWL class expressions that are no named classes.  It currently supports the description
@@ -25,13 +24,13 @@ class ELReasoner(axioms: Iterable[OWLSubClassOfAxiom | OWLClassAssertionAxiom | 
   extends PartialOrdering[OWLClassExpression] {
 
   private val ontology = OWLManager.createOWLOntologyManager().createOntology()
-  private val premises = mutable.HashSet[OWLClassExpression]()
+//  private val premises = mutable.HashSet[OWLClassExpression]()
   axioms.foreach(addAxiom)
 
   private def addAxiom(axiom: OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom): Unit = {
     ontology.addAxiom(axiom)
-    if axiom.isInstanceOf[OWLSubClassOfAxiom] then
-      premises.add(axiom.asInstanceOf[OWLSubClassOfAxiom].getSubClass)
+//    if axiom.isInstanceOf[OWLSubClassOfAxiom] then
+//      premises.add(axiom.asInstanceOf[OWLSubClassOfAxiom].getSubClass)
   }
 
   def addAxiomAndFlush(axiom: OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom): Unit = {
@@ -141,9 +140,9 @@ class ELReasoner(axioms: Iterable[OWLSubClassOfAxiom | OWLClassAssertionAxiom | 
       elkReasoner.types(individual.asOWLNamedIndividual()).toScala(LazyList).map(representativeFor)
   }
 
-  def premisesAmongTypes(individual: OWLIndividual): LazyList[OWLClassExpression] = {
-    types(individual).filter(premises)
-  }
+//  def premisesAmongTypes(individual: OWLIndividual): LazyList[OWLClassExpression] = {
+//    types(individual).filter(premises)
+//  }
 
   def isSubsumedBy(subClassExpression: OWLClassExpression, superClassExpression: OWLClassExpression): Boolean = {
     ensureHasRepresentative(superClassExpression)
@@ -180,13 +179,13 @@ class ELReasoner(axioms: Iterable[OWLSubClassOfAxiom | OWLClassAssertionAxiom | 
         ).toScala(LazyList).filterNot(_ equals OWLNothing).map(representativeFor)
   }
 
-  def premisesAmongSubsumers(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
-    subsumers(classExpression).filter(premises)
-  }
+//  def premisesAmongSubsumers(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
+//    subsumers(classExpression).filter(premises)
+//  }
 
-  def premisesAmongSubsumees(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
-    subsumees(classExpression).filter(premises)
-  }
+//  def premisesAmongSubsumees(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
+//    subsumees(classExpression).filter(premises)
+//  }
 
   override def tryCompare(x: OWLClassExpression, y: OWLClassExpression): Option[Int] = {
     if (lt(x, y))          Some(-1)
