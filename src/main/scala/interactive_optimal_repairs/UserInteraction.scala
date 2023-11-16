@@ -5,7 +5,7 @@ import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
 
 import org.phenoscape.scowl.*
-import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLClassExpression, OWLIndividual, OWLNamedIndividual, OWLObjectProperty, OWLObjectPropertyAssertionAxiom}
+import org.semanticweb.owlapi.model.*
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec

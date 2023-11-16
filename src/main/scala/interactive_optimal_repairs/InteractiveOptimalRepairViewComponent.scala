@@ -2,6 +2,7 @@ package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
 import interactive_optimal_repairs.Answer.*
+import protege_components.ProtegeWorker.*
 import protege_components.Util.*
 import protege_components.{OrderedOWLAxiomList, OrderedOWLAxiomListFrameSectionRow, TextMListButton}
 
@@ -14,13 +15,10 @@ import org.semanticweb.owlapi.model.parameters.Imports
 import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLException, OWLObjectPropertyAssertionAxiom, OWLOntologyManager}
 
 import java.awt.*
-import java.beans.{PropertyChangeEvent, PropertyChangeListener}
 import java.util.Collections
 import javax.swing.*
 import scala.jdk.StreamConverters.*
 import scala.reflect.ClassTag
-
-import protege_components.ProtegeWorker.*
 
 class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 

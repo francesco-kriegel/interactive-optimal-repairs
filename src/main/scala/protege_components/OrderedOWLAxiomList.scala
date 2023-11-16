@@ -1,6 +1,7 @@
 package de.tu_dresden.inf.lat
 package protege_components
 
+import protege_components.ProtegeWorker.*
 import protege_components.Util.*
 
 import com.google.common.collect.Lists
@@ -17,8 +18,6 @@ import java.util.{Collections, Comparator, List, Set}
 import javax.swing.*
 import javax.swing.event.DocumentEvent
 import scala.reflect.ClassTag
-
-import protege_components.ProtegeWorker.*
 
 class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
                                                      rowLabel: String,
