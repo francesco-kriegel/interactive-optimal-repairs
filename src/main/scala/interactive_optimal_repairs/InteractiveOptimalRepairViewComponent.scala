@@ -80,6 +80,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 
         if isSupported then {
 
+          given ontologyManager: OWLOntologyManager = getOWLModelManager.getOWLOntologyManager
           given owlEditorKit: OWLEditorKit = getOWLEditorKit()
 
           asynchronouslyInNewWorker {
@@ -118,7 +119,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                   terminologyReasoner.dispose()
                   ontologyReasoner.dispose()
                   val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(s.toString), s)).toMap
-                  strategyRadioButtons.foreach { case (button, Strategy.SMART) => button.setEnabled(false); case _ => {} }
+                  // strategyRadioButtons.foreach { case (button, Strategy.SMART) => button.setEnabled(false); case _ => {} }
                   val strategyRadioButtonGroup = ButtonGroup()
                   strategyRadioButtons.keys.foreach(strategyRadioButtonGroup.add)
                   val strategyRadioButtonPanel = JPanel()
@@ -204,7 +205,13 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                                     java.util.Collections.singletonList(
                                       newDeclineButton(this, row.getAxiom))
                                   case Strategy.SMART =>
-                                    ???
+                                    if userInteraction.asInstanceOf[SmartUserInteraction].isInPhase2() then
+                                      java.util.List.of(
+                                        newAcceptButton(this, row.getAxiom),
+                                        newDeclineButton(this, row.getAxiom))
+                                    else
+                                      java.util.Collections.singletonList(
+                                        newDeclineButton(this, row.getAxiom))
                                   case Strategy.BEST =>
                                     java.util.List.of(
                                       newAcceptButton(this, row.getAxiom),
@@ -292,7 +299,6 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                               val queryLanguage = queryLanguageRadioButtons.keys.find(_.isSelected).map(queryLanguageRadioButtons).get
                               val compatibilityMode = compatibilityModeRadioButtons.keys.find(_.isSelected).map(compatibilityModeRadioButtons).get
                               asynchronouslyInNewWorker {
-                                given ontologyManager: OWLOntologyManager = getOWLModelManager.getOWLOntologyManager
                                 Repair(queryLanguage, repairSeed).compute(compatibilityMode)
                               } executeAndThen {
                                 repair => {

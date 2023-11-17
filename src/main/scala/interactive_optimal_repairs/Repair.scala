@@ -2,7 +2,7 @@ package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
 import interactive_optimal_repairs.CompatibilityMode.*
-import interactive_optimal_repairs.IQSaturation.toShortDLString
+import interactive_optimal_repairs.IQSaturationNode.toShortDLString
 import interactive_optimal_repairs.QueryLanguage.*
 import interactive_optimal_repairs.Util.{ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, Nominal}
 import protege_components.Util.htmlParagraph
@@ -20,7 +20,7 @@ enum CompatibilityMode(val description: String) {
 
 object Repair {
 
-  def apply(queryLanguage: QueryLanguage, seed: RepairSeed)(using configuration: RepairConfiguration)(using ontologyManager: OWLOntologyManager): Repair = {
+  def apply(queryLanguage: QueryLanguage, seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager): Repair = {
     queryLanguage match
       case IQ => IQRepair(seed)
       case IRQ => IRQRepair(seed)
@@ -29,30 +29,37 @@ object Repair {
 
 }
 
-trait Repair(val seed: RepairSeed)(using configuration: RepairConfiguration) {
+trait Repair(val seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration) {
 
   def entails(query: Query): Boolean = {
-    val saturation = IQSaturation()
-    query match
-      case classAssertion @ ClassAssertion(_, classExpression, individual @ NamedIndividual(_)) if ELExpressivityChecker.checkClassExpression(classExpression) =>
-        (configuration.ontologyReasoner entails classAssertion)
-          && !(classExpression isCoveredBy seed(individual) wrt configuration.ontologyReasoner)
-      case roleAssertion @ ObjectPropertyAssertion(_, property @ ObjectProperty(_), subject @ NamedIndividual(_), target @ NamedIndividual(_)) =>
-        (configuration.axioms contains roleAssertion)
-          && !(configuration.request.axioms contains roleAssertion)
-          && (saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner)
-      case _ => ???
+    if saturated then
+      val saturation = IQSaturation()
+      query match
+        case classAssertion @ ClassAssertion(_, classExpression, individual @ NamedIndividual(_)) if ELExpressivityChecker.checkClassExpression(classExpression) =>
+          (configuration.ontologyReasoner entails classAssertion)
+            && !(classExpression isCoveredBy seed(individual) wrt configuration.ontologyReasoner)
+        case roleAssertion @ ObjectPropertyAssertion(_, property @ ObjectProperty(_), subject @ NamedIndividual(_), target @ NamedIndividual(_)) =>
+          (configuration.axioms contains roleAssertion)
+            && !(configuration.request.axioms contains roleAssertion)
+            && (saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner)
+        case _ => ???
+    else
+      ???
   }
 
   def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology
 
 }
 
-class IQRepair(seed: RepairSeed)(using configuration: RepairConfiguration)(using ontologyManager: OWLOntologyManager) extends Repair(seed) {
+class IQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends Repair(seed, saturated) {
 
   override def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology = {
-    val saturation = IQSaturation()
+    val saturation = if saturated then IQSaturation() else NoSaturation()
     val repair = ontologyManager.createOntology()
+    configuration.axioms.foreach {
+      case subClassOfAxiom: OWLSubClassOfAxiom => ontologyManager.addAxiom(repair, subClassOfAxiom)
+      case _ => // Do nothing.
+    }
     val factory = CopiedOWLIndividual.FactoryIQ(compatibilityMode)
     val queue = mutable.Queue[CopiedOWLIndividual]()
     configuration.axioms foreach {
@@ -66,11 +73,11 @@ class IQRepair(seed: RepairSeed)(using configuration: RepairConfiguration)(using
       .foreach(queue.enqueue)
     while queue.nonEmpty do
       val subject = queue.dequeue()
-      saturation.getLabelsInSaturation(subject.individualInTheSaturation)
+      saturation.getLabels(subject.individualInTheSaturation)
         .filterNot(subject.repairType.atoms.contains)
         .map(subject.individualInTheRepair Type _)
         .foreach(ontologyManager.addAxiom(repair, _))
-      saturation.getSuccessorsInSaturation(subject.individualInTheSaturation)
+      saturation.getSuccessors(subject.individualInTheSaturation)
         .foreach { (property, targetInTheSaturation) =>
           RepairType.computeAllMinimalRepairTypes(targetInTheSaturation, saturation.Succ(subject.repairType, property, targetInTheSaturation))
             .foreach { repairType =>
@@ -84,7 +91,7 @@ class IQRepair(seed: RepairSeed)(using configuration: RepairConfiguration)(using
   }
 }
 
-class IRQRepair(seed: RepairSeed)(using configuration: RepairConfiguration)(using ontologyManager: OWLOntologyManager)
+class IRQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
   extends IQRepair({
     val newAxioms = mutable.HashSet.from[OWLClassAssertionAxiom](seed.axioms)
     configuration.request.axioms foreach {
@@ -100,9 +107,9 @@ class IRQRepair(seed: RepairSeed)(using configuration: RepairConfiguration)(usin
       case _ => // Do nothing.
     }
     RepairSeed(seed.preprocessed, newAxioms)
-  }) {}
+  }, saturated) {}
 
-class CQRepair(seed: RepairSeed)(using configuration: RepairConfiguration) extends Repair(seed) {
+class CQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration) extends Repair(seed, saturated) {
   override def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology = ???
 }
 
@@ -138,7 +145,7 @@ object CopiedOWLIndividual {
           // NamedIndividual(NodeID.nextAnonymousIRI())
           NamedIndividual("repair:variable#" + NodeID.nextAnonymousIRI().substring(2))
         case EXPLICIT_NAMED_INDIVIDUALS =>
-          NamedIndividual("repair:variable#⟨" + toShortDLString(objectInTheSaturation) + "," + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}") + "⟩")
+          NamedIndividual("repair:variable#⟨" + objectInTheSaturation.toShortDLString() + "," + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}") + "⟩")
     }
 
   }

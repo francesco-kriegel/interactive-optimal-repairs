@@ -1,18 +1,23 @@
 package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
+import interactive_optimal_repairs.Answer.ACCEPT
 import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
+import protege_components.ProtegeWorker.asynchronouslyInNewWorker
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
+import org.semanticweb.owlapi.model.parameters.Imports
 
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 
 object UserInteraction {
-  def apply(strategy: Strategy)(using configuration: RepairConfiguration): UserInteraction =
+  def apply(strategy: Strategy)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager): UserInteraction =
     strategy match
       case Strategy.FAST => FastUserInteraction()
       case Strategy.BEST => BestUserInteraction()
@@ -24,10 +29,10 @@ abstract class UserInteraction()(using configuration: RepairConfiguration) {
   var user: User = _
   def start(user: User): Unit = {
     this.user = user
-    start()
+    initialize()
   }
 
-  protected def start(): Unit
+  protected def initialize(): Unit
   def receiveAnswer(query: Query, answer: Answer): Unit
   def hasBeenCompleted(): Boolean
   def getRepairSeed(): RepairSeed
@@ -37,15 +42,15 @@ abstract class UserInteraction()(using configuration: RepairConfiguration) {
 /* This strategy is described in the JELIA 2023 paper. */
 class FastUserInteraction()(using configuration: RepairConfiguration) extends UserInteraction() {
 
-  private val repairSeed = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
-  private val nonDeclinedRoleAssertions = mutable.HashSet[OWLObjectPropertyAssertionAxiom]()
-  private val pendingQueries_Conjunction = mutable.HashMap[OWLClassAssertionAxiom, mutable.HashSet[OWLClassAssertionAxiom]]()
+  protected val repairSeed = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
+  protected val nonDeclinedRoleAssertions = ConcurrentHashMap.newKeySet[OWLObjectPropertyAssertionAxiom]().asScala
+  protected val pendingQueries_Conjunction = ConcurrentHashMap[OWLClassAssertionAxiom, mutable.HashSet[OWLClassAssertionAxiom]]().asScala
               // contains entries a:C₁⊓...⊓Cₙ ⟼ a:C₁ | ... | a:Cₙ
-  private val pendingQueries_ExistentialRestriction = mutable.HashMap[(OWLIndividual, OWLObjectProperty, OWLIndividual, OWLClassExpression), (OWLObjectPropertyAssertionAxiom, OWLClassAssertionAxiom)]()
+  protected val pendingQueries_ExistentialRestriction = ConcurrentHashMap[(OWLIndividual, OWLObjectProperty, OWLIndividual, OWLClassExpression), (OWLObjectPropertyAssertionAxiom, OWLClassAssertionAxiom)]().asScala
               // contains entries (a,r,b,C) ⟼ (a,b):r | b:C
-  private val isCurrentlyProcessing = AtomicInteger(0)
+  protected val isCurrentlyProcessing = AtomicInteger(0)
 
-  private def processDeclinedQueries(queries: Iterable[Query]): Unit = {
+  protected def processDeclinedQueries(queries: Iterable[Query]): Unit = {
     val undecidedQueries_Conjunction = mutable.HashSet[OWLClassAssertionAxiom]()
     val undecidedQueries_ExistentialRestriction = mutable.HashSet[OWLClassAssertionAxiom]()
     @tailrec def recursivelyProcess(qs: Iterable[Query]): Unit = {
@@ -134,7 +139,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
     }
   }
 
-  override protected def start(): Unit = {
+  override protected def initialize(): Unit = {
     configuration.axioms.foreach {
       case roleAssertion: OWLObjectPropertyAssertionAxiom => nonDeclinedRoleAssertions += roleAssertion
       case _ => // Do nothing.
@@ -145,11 +150,6 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
     isCurrentlyProcessing.incrementAndGet()
     user.removeQuestion(query)
-    // query match
-    //   case query: OWLClassAssertionAxiom =>
-    //     pendingQueries_Conjunction -= query
-    //   case query: OWLObjectPropertyAssertionAxiom =>
-    //     // TODO
     answer match
       case Answer.DECLINE => processDeclinedQueries(Iterable.single(query))
       case _ => ??? // Should never occur.
@@ -167,20 +167,82 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
 
 }
 
-class SmartUserInteraction()(using configuration: RepairConfiguration) extends UserInteraction() {
+class SmartUserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends FastUserInteraction() {
 
-  //      case Strategy.SMART =>
-  //        // We should only consider the environments of individuals in the repair request,
-  //        // as well as the individuals reachable on a path of accepted role assertions.  Any ideas?
-  //        throw NotImplementedError()
+  private var phase = 1
+  private val pendingPhase2Queries = ConcurrentHashMap.newKeySet[Query]().asScala
+  private val declinedPhase2Queries = ConcurrentHashMap.newKeySet[Query]().asScala
 
-  override protected def start(): Unit = ???
+  def isInPhase2(): Boolean = {
+    phase equals 2
+  }
 
-  override def receiveAnswer(query: Query, answer: Answer): Unit = ???
+  override def start(user: User): Unit = {
+    super.start(user)
+    println("Phase 1 running ...")
+    asynchronouslyInNewWorker {
+      while !super.hasBeenCompleted() do Thread.sleep(100)
+    } executeAndThen {
+      println("Initializing phase 2 ...")
+      initializePhase2()
+      phase = 2
+      println("Phase 2 running ...")
+      asynchronouslyInNewWorker {
+        while pendingPhase2Queries.nonEmpty do Thread.sleep(100)
+      } executeAndThen {
+        println("Initializing phase 3 ...")
+        initializePhase3()
+        phase = 3
+        println("Phase 3 running ...")
+      }
+    }
+  }
 
-  override def hasBeenCompleted(): Boolean = ???
+  private def initializePhase2(): Unit = {
+    val seed = getRepairSeed()
+    val saturatedRepair = IQRepair(seed, true)
+    val unsaturatedRepair = IQRepair(seed, false)
+    val unsaturatedRepairReasoner =
+      ELReasoner(
+        unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS).getAxioms(Imports.INCLUDED).asScala.collect {
+          case classAssertion: OWLClassAssertionAxiom => classAssertion
+          case propertyAssertion: OWLObjectPropertyAssertionAxiom => propertyAssertion
+          case classInclusion: OWLSubClassOfAxiom => classInclusion
+        },
+        configuration.subClassExpressions)
 
-  override def getRepairSeed(): RepairSeed = ???
+    for {
+      individual <- configuration.ontologyReasoner.instances(OWLThing)
+      // classExpression <- minimalElements(configuration.ontologyReasoner.types(individual), _ isSubsumedBy _ wrt configuration.trivialReasoner)
+      classExpression <- configuration.ontologyReasoner.types(individual)
+    }
+      val assertion = individual Type classExpression
+      if (saturatedRepair entails assertion) && !(unsaturatedRepairReasoner entails assertion) then
+        pendingPhase2Queries += assertion
+        user.showQuestion(assertion)
+  }
+
+  override def receiveAnswer(query: Query, answer: Answer): Unit = {
+    if (phase equals 2) then
+      isCurrentlyProcessing.incrementAndGet()
+      pendingPhase2Queries -= query
+      user.removeQuestion(query)
+      answer match
+        case Answer.ACCEPT => // TODO: Should not be ignored in the future!
+        case Answer.DECLINE => declinedPhase2Queries += query
+        case _ => ??? // Should never occur.
+      isCurrentlyProcessing.decrementAndGet()
+    else
+      super.receiveAnswer(query, answer)
+  }
+
+  private def initializePhase3(): Unit = {
+    processDeclinedQueries(declinedPhase2Queries)
+  }
+
+  override def hasBeenCompleted(): Boolean = {
+    (phase equals 3) && super.hasBeenCompleted()
+  }
 
 }
 
@@ -196,7 +258,7 @@ class BestUserInteraction()(using configuration: RepairConfiguration) extends Us
 
   val remainingQueries = mutable.HashSet.from[Query](atomicClassAssertions)
 
-  override protected def start(): Unit = {
+  override protected def initialize(): Unit = {
     computeInheritedAnswers(true)
     remainingQueries.foreach(user.showQuestion)
   }
