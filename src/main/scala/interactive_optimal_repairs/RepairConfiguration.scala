@@ -27,4 +27,9 @@ class RepairConfiguration(val axioms: collection.Set[OWLSubClassOfAxiom | OWLCla
   val trivialReasoner: ELReasoner = ELReasoner(Set.empty, subClassExpressions, true)
   val ontologyReasoner: ELReasoner = ELReasoner(axioms, subClassExpressions, true)
 
+  def dispose(): Unit = {
+    trivialReasoner.dispose()
+    ontologyReasoner.dispose()
+  }
+
 }

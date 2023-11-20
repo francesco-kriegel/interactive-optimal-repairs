@@ -54,8 +54,8 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
 
   override protected def getListItemButtons(item: MListItem): util.List[MListButton] = {
     item match
-//      case row: OrderedOWLAxiomListFrameSectionRow[Ax] =>
-//      case classTag[OrderedOWLAxiomListFrameSectionRow[Ax]](row) =>
+      // case row: OrderedOWLAxiomListFrameSectionRow[Ax] =>
+      // case classTag[OrderedOWLAxiomListFrameSectionRow[Ax]](row) =>
       case classTag_OrderedOWLAxiomListFrameSectionRow_Ax(row) =>
         val editButton = MListEditButton((_: ActionEvent) => {
           SwingUtilities.invokeLater(() => {
@@ -71,20 +71,14 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
       case _ => Collections.emptyList[MListButton]
   }
 
-//  private var worker: Option[ProtegeWorker[Option[OWLException], Void]] = None
-//  private def asynchronouslyInTheWorker(code: => Option[OWLException]): ProtegeWorker[Option[OWLException], Void] = {
-//    worker.foreach(_.cancel(true))
-//    val w: ProtegeWorker[Option[OWLException], Void] = () => { code }
-//    worker = Some(w)
-//    w.message = "Checking whether the input is a well-formed query."
-//    w
-//  }
   private var maybeWorker: Option[ProtegeWorker[_, Void]] = None
   private def asynchronouslyInTheWorker[T](message: String)(code: => T): ProtegeWorker[T, Void] = {
-    maybeWorker.foreach(_.cancel(true))
-    val worker = asynchronouslyInNewWorker(message) { code }
-    maybeWorker = Some(worker)
-    worker
+    maybeWorker.synchronized {
+      maybeWorker.foreach(_.cancel(true))
+      val worker = asynchronouslyInNewWorker(message) { code }
+      maybeWorker = Some(worker)
+      worker
+    }
   }
 
   private def inputAxiom(initialValue: Ax | Null = null): Option[Ax] = {
@@ -120,25 +114,12 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
       ))
     val okButton = JButton("OK")
     val cancelButton = JButton("Cancel")
-//    val statusChangedListener: InputVerificationStatusChangedListener = _ => {
-//      unwantedConsequenceStatusLabel.setText("Please wait...")
-//      try {
-//        val axiom = unwantedConsequenceAxiomEditor.getEditedObject()
-//        checkIfAxiomIsAllowed(axiom)
-//        okButton.setEnabled(true)
-//        unwantedConsequenceStatusLabel.setText("The axiom can be added to the repair request.")
-//      } catch {
-//        case e: OWLException =>
-//          okButton.setEnabled(false)
-//          unwantedConsequenceStatusLabel.setText(asHTMLMessage(e.getMessage))
-//      }
-//    }
-//    unwantedConsequenceAxiomEditor.addStatusChangedListener(statusChangedListener)
     val documentListener: SimpleDocumentListener = (_: DocumentEvent) => {
       unwantedConsequenceStatusLabel.setText("Please wait...")
       try {
         val axiom = unwantedConsequenceAxiomEditor.getEditedObject()
         asynchronouslyInTheWorker("Checking whether the input is a well-formed query.") {
+          Thread.sleep(100)
           getOWLExceptionIfAxiomIsNotAllowed(axiom)
         } executeAndThen {
           maybeOWLException =>
@@ -157,7 +138,6 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
     }
     unwantedConsequenceAxiomEditor.addDocumentListener(documentListener)
     if initialValue != null then unwantedConsequenceAxiomEditor.setEditedObject(initialValue.asInstanceOf[Ax])
-//    statusChangedListener.verifiedStatusChanged(true)
     unwantedConsequenceAxiomEditorComponent.setEnabled(true)
     val pane = JOptionPane(panel, JOptionPane.PLAIN_MESSAGE, JOptionPane.OK_CANCEL_OPTION, null, Array[Object](okButton, cancelButton), null)
     okButton.addActionListener(_ => { pane.setValue(JOptionPane.OK_OPTION) })
@@ -166,10 +146,8 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
     dialog.setResizable(true)
     dialog.setMinimumSize(Dimension(320, 480))
     dialog.setVisible(true)
-//    val axiom = unwantedConsequenceAxiomEditor.getEditedObject()
-//    unwantedConsequenceAxiomEditor.removeStatusChangedListener(statusChangedListener)
     unwantedConsequenceAxiomEditor.removeDocumentListener(documentListener)
-//    unwantedConsequenceAxiomEditor.dispose()
+    // unwantedConsequenceAxiomEditor.dispose()
     pane.getValue match
       case JOptionPane.CANCEL_OPTION => None
       case JOptionPane.OK_OPTION => Some(unwantedConsequenceAxiomEditor.getEditedObject())

@@ -1,7 +1,7 @@
 package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
-import interactive_optimal_repairs.Answer.ACCEPT
+import interactive_optimal_repairs.Answer.*
 import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
 import protege_components.ProtegeWorker.asynchronouslyInNewWorker
@@ -21,7 +21,7 @@ object UserInteraction {
     strategy match
       case Strategy.FAST => FastUserInteraction()
       case Strategy.BEST => BestUserInteraction()
-      case Strategy.SMART => SmartUserInteraction()
+      case Strategy.FASTSMART => FastSmartUserInteraction()
 }
 
 abstract class UserInteraction()(using configuration: RepairConfiguration) {
@@ -36,6 +36,8 @@ abstract class UserInteraction()(using configuration: RepairConfiguration) {
   def receiveAnswer(query: Query, answer: Answer): Unit
   def hasBeenCompleted(): Boolean
   def getRepairSeed(): RepairSeed
+  def getButtonTypes(query: Query): collection.Set[Answer]
+  def dispose(): Unit
 
 }
 
@@ -165,17 +167,21 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
     RepairSeed(true, axioms.toSeq: _*)
   }
 
+  override def getButtonTypes(query: Query): collection.Set[Answer] = {
+    Set(DECLINE)
+  }
+
+  override def dispose(): Unit = {
+    // Do nothing.
+  }
+
 }
 
-class SmartUserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends FastUserInteraction() {
+class FastSmartUserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends FastUserInteraction() {
 
   private var phase = 1
   private val pendingPhase2Queries = ConcurrentHashMap.newKeySet[Query]().asScala
   private val declinedPhase2Queries = ConcurrentHashMap.newKeySet[Query]().asScala
-
-  def isInPhase2(): Boolean = {
-    phase equals 2
-  }
 
   override def start(user: User): Unit = {
     super.start(user)
@@ -220,6 +226,7 @@ class SmartUserInteraction()(using configuration: RepairConfiguration, ontologyM
       if (saturatedRepair entails assertion) && !(unsaturatedRepairReasoner entails assertion) then
         pendingPhase2Queries += assertion
         user.showQuestion(assertion)
+    unsaturatedRepairReasoner.dispose()
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
@@ -244,6 +251,17 @@ class SmartUserInteraction()(using configuration: RepairConfiguration, ontologyM
     (phase equals 3) && super.hasBeenCompleted()
   }
 
+  override def getButtonTypes(query: Query): collection.Set[Answer] = {
+    if phase equals 2 then
+      Set(ACCEPT, DECLINE)
+    else
+      Set(DECLINE)
+  }
+
+  override def dispose(): Unit = {
+    // Do nothing.
+  }
+
 }
 
 /* This strategy is described in the KR 2022 paper. */
@@ -255,7 +273,6 @@ class BestUserInteraction()(using configuration: RepairConfiguration) extends Us
   val particularizedRepairRequest = mutable.HashSet.from(configuration.request.axioms)
   val tboxAxioms = configuration.axioms.filter({ case SubClassOf(_, _, _) => true; case _ => false })
   val templateReasoner = ELReasoner(tboxAxioms, configuration.subClassExpressions, false)
-
   val remainingQueries = mutable.HashSet.from[Query](atomicClassAssertions)
 
   override protected def initialize(): Unit = {
@@ -303,10 +320,20 @@ class BestUserInteraction()(using configuration: RepairConfiguration) extends Us
     RepairSeed(false, seedAxioms: _*)
   }
 
+  override def getButtonTypes(query: Query): collection.Set[Answer] = {
+    Set(ACCEPT, IGNORE, DECLINE)
+  }
+
+  override def dispose(): Unit = {
+    templateReasoner.dispose()
+  }
+
 }
 
-enum Strategy {
-  case FAST, BEST, SMART
+enum Strategy(val name: String, val description: String) {
+  case FAST extends Strategy("Fast", "Constructs a repair seed with fewest number of questions.")
+  case BEST extends Strategy("Best", "Can construct every repair seed.")
+  case FASTSMART extends Strategy("Fast-smart", "TBA")
 }
 
 trait User {
@@ -315,5 +342,5 @@ trait User {
 }
 
 enum Answer {
-  case ACCEPT, DECLINE, IGNORE
+  case ACCEPT, IGNORE, DECLINE
 }

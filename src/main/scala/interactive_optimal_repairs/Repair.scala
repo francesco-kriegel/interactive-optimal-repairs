@@ -97,13 +97,13 @@ class IRQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration
     configuration.request.axioms foreach {
       case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
         // newAxioms += (subject Type (property some Nominal(target))) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-         val nominal = Nominal(target)
-         val successor = property some nominal
-         newAxioms += (subject Type successor) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-         configuration.trivialReasoner.addRepresentative(nominal)
-         configuration.trivialReasoner.addRepresentative(successor)
-         configuration.ontologyReasoner.addRepresentative(nominal)
-         configuration.ontologyReasoner.addRepresentative(successor)
+        val nominal = Nominal(target)
+        val successor = property some nominal
+        newAxioms += (subject Type successor) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
+        configuration.trivialReasoner.addRepresentative(nominal)
+        configuration.trivialReasoner.addRepresentative(successor)
+        configuration.ontologyReasoner.addRepresentative(nominal)
+        configuration.ontologyReasoner.addRepresentative(successor)
       case _ => // Do nothing.
     }
     RepairSeed(seed.preprocessed, newAxioms)

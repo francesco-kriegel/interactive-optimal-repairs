@@ -10,13 +10,15 @@ import org.protege.editor.core.ui.list.MListButton
 import org.protege.editor.owl.OWLEditorKit
 import org.protege.editor.owl.model.classexpression.OWLExpressionParserException
 import org.protege.editor.owl.ui.view.AbstractOWLViewComponent
-import org.semanticweb.elk.owlapi.ElkReasonerFactory
+import org.semanticweb.elk.owlapi.{ElkReasoner, ElkReasonerFactory}
+import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.Imports
-import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLException, OWLObjectPropertyAssertionAxiom, OWLOntologyManager}
 
 import java.awt.*
+import java.awt.event.{WindowEvent, WindowListener}
 import java.util.Collections
 import javax.swing.*
+import scala.jdk.CollectionConverters.*
 import scala.jdk.StreamConverters.*
 import scala.reflect.ClassTag
 
@@ -56,21 +58,61 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
   }
 
   private def startUserInteraction(): Unit = {
+
+    val activeOntology = getOWLModelManager.getActiveOntology
+
+    // The following workaround is necessary since a method `setMutable(mutable: Boolean)` is not available in class `org.protege.editor.owl.model.OWLModelManager`.
+    val impendingOWLOntologyChangeListener: ImpendingOWLOntologyChangeListener = changes => {
+      for (change <- changes.asScala)
+        if change.getOntology equals activeOntology then
+          JOptionPane.showMessageDialog(this, "The active ontology must not be changed during repair.  The change has been dismissed.", "Warning", JOptionPane.WARNING_MESSAGE)
+          throw OWLOntologyChangeVetoException(change.getChangeData, "The active ontology must not be changed during repair.  The change has been dismissed.")
+    }
+    getOWLModelManager.getOWLOntologyManager.addImpendingOntologyChangeListener(impendingOWLOntologyChangeListener)
+
     val panel = JPanel(BorderLayout(16, 16))
     panel.add(breakingJLabel("Please wait while it is determined if the active ontology is supported..."), BorderLayout.NORTH)
     val pane = JOptionPane(panel)
     val dialog = pane.createDialog(InteractiveOptimalRepairViewComponent.this, "Interactive Optimal Repair")
+    // dialog.setAlwaysOnTop(true)
+    dialog.setModalityType(Dialog.ModalityType.MODELESS)
+    dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE)
+    dialog.addWindowListener(new WindowListener() {
+      def windowOpened(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+      def windowClosing(event: java.awt.event.WindowEvent): Unit = { dialog.dispose() }
+      def windowClosed(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+      def windowActivated(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+      def windowDeactivated(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+      def windowIconified(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+      def windowDeiconified(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+    })
+    def whenDialogClosed(code: => Unit): Unit = {
+      dialog.addWindowListener(new WindowListener() {
+        def windowOpened(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+        def windowClosing(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+        def windowClosed(event: java.awt.event.WindowEvent): Unit = { code }
+        def windowActivated(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+        def windowDeactivated(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+        def windowIconified(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+        def windowDeiconified(event: java.awt.event.WindowEvent): Unit = { /* Do nothing. */ }
+      })
+    }
+    whenDialogClosed {
+      panel.removeAll()
+      cancelActiveWorkers()
+      getOWLModelManager.getOWLOntologyManager.removeImpendingOntologyChangeListener(impendingOWLOntologyChangeListener)
+    }
     dialog.setResizable(true)
     dialog.setMinimumSize(Dimension(640, 480))
+
     val cancelButton = JButton("Cancel")
     cancelButton.addActionListener(_ => {
-      cancelActiveWorkers()
-      dialog.setVisible(false)
+      dialog.dispose()
     })
     val nextButton = JButton("Next")
     nextButton.setEnabled(false)
     asynchronouslyInNewWorker {
-      ELExpressivityChecker.check(getOWLModelManager().getActiveOntology())
+      ELExpressivityChecker.check(activeOntology)
     } executeAndThen {
       isSupported => {
         panel.removeAll()
@@ -84,18 +126,20 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
           given owlEditorKit: OWLEditorKit = getOWLEditorKit()
 
           asynchronouslyInNewWorker {
-            val terminology = getOWLModelManager.getOWLOntologyManager.createOntology(getOWLModelManager.getActiveOntology.getTBoxAxioms(Imports.INCLUDED))
+            val terminology = getOWLModelManager.getOWLOntologyManager.createOntology(activeOntology.getTBoxAxioms(Imports.INCLUDED))
             val terminologyReasoner = ElkReasonerFactory().createNonBufferingReasoner(terminology)
+            whenDialogClosed { terminologyReasoner.dispose() }
             terminologyReasoner.precomputeInferences()
             terminologyReasoner.flush()
             terminologyReasoner
           } inParallelWith asynchronouslyInNewWorker {
-            val ontologyReasoner = ElkReasonerFactory().createNonBufferingReasoner(getOWLModelManager.getActiveOntology)
+            val ontologyReasoner = ElkReasonerFactory().createNonBufferingReasoner(activeOntology)
+            whenDialogClosed { ontologyReasoner.dispose() }
             ontologyReasoner.precomputeInferences()
             ontologyReasoner.flush()
             ontologyReasoner
           } executeAndThen {
-            (terminologyReasoner, ontologyReasoner) => {
+            (terminologyReasoner: ElkReasoner, ontologyReasoner: ElkReasoner) => {
               nextButton.enableWithSingleActionListener(_ => {
                 /* State 0: Repair Request */
                 panel.removeAll()
@@ -140,7 +184,8 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                     val strategy = strategyRadioButtons.keys.find(_.isSelected).map(strategyRadioButtons).get
 
                     given repairConfiguration: RepairConfiguration =
-                      RepairConfiguration(ELExpressivityChecker.getELAxioms(getOWLModelManager.getActiveOntology).toSet, repairRequest)
+                      RepairConfiguration(ELExpressivityChecker.getELAxioms(activeOntology).toSet, repairRequest)
+                    whenDialogClosed { repairConfiguration.dispose() }
 
                     asynchronouslyInNewWorker {
                       UserInteraction(strategy)
@@ -200,23 +245,11 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           override protected def getButtons(value: Object): java.util.List[MListButton] = {
                             value match
                               case classTag_OrderedOWLAxiomListFrameSectionRow_Query(row) if isEditable =>
-                                strategy match
-                                  case Strategy.FAST =>
-                                    java.util.Collections.singletonList(
-                                      newDeclineButton(this, row.getAxiom))
-                                  case Strategy.SMART =>
-                                    if userInteraction.asInstanceOf[SmartUserInteraction].isInPhase2() then
-                                      java.util.List.of(
-                                        newAcceptButton(this, row.getAxiom),
-                                        newDeclineButton(this, row.getAxiom))
-                                    else
-                                      java.util.Collections.singletonList(
-                                        newDeclineButton(this, row.getAxiom))
-                                  case Strategy.BEST =>
-                                    java.util.List.of(
-                                      newAcceptButton(this, row.getAxiom),
-                                      newIgnoreButton(this, row.getAxiom),
-                                      newDeclineButton(this, row.getAxiom))
+                                Answer.values.filter(userInteraction.getButtonTypes(row.getAxiom)).map({
+                                  case ACCEPT => newAcceptButton(this, row.getAxiom)
+                                  case IGNORE => newIgnoreButton(this, row.getAxiom)
+                                  case DECLINE => newDeclineButton(this, row.getAxiom)
+                                }).toList.asJava
                               case _ => Collections.emptyList()
                           }
                         }
@@ -237,6 +270,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       asynchronouslyInNewWorker("User interaction is running...") {
                         userInteraction.start(user)
                         while !userInteraction.hasBeenCompleted() do Thread.sleep(1000)
+                        userInteraction.dispose()
                         userInteraction.getRepairSeed()
                       } inParallelWith asynchronouslyInNewWorker("Checking if the input ontology is acyclic...") {
                         IQSaturation().isAcyclic
@@ -304,13 +338,12 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                                 repair => {
                                   nextButton.enableWithSingleActionListener(_ => {
                                     /* State 5: All Tasks Finished */
+                                    getOWLModelManager.getOWLOntologyManager.removeImpendingOntologyChangeListener(impendingOWLOntologyChangeListener)
                                     asynchronouslyInNewWorker {
-                                      getOWLModelManager.getOWLOntologyManager.removeAxioms(getOWLModelManager.getActiveOntology, getOWLModelManager.getActiveOntology.getABoxAxioms(Imports.INCLUDED))
-                                      getOWLModelManager.getOWLOntologyManager.addAxioms(getOWLModelManager.getActiveOntology, repair.getABoxAxioms(Imports.INCLUDED))
+                                      getOWLModelManager.getOWLOntologyManager.removeAxioms(activeOntology, activeOntology.getABoxAxioms(Imports.INCLUDED))
+                                      getOWLModelManager.getOWLOntologyManager.addAxioms(activeOntology, repair.getABoxAxioms(Imports.INCLUDED))
                                     } executeAndThen {
-                                      _ =>
-                                        panel.removeAll()
-                                        dialog.setVisible(false)
+                                      dialog.dispose()
                                     }
                                   })
                                 }

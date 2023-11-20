@@ -5,7 +5,9 @@ import org.protege.editor.core.ProtegeApplication
 import org.protege.editor.core.ui.progress.BackgroundTask
 
 import java.beans.PropertyChangeEvent
+import java.util.concurrent.ConcurrentHashMap
 import javax.swing.SwingWorker
+import scala.jdk.CollectionConverters.*
 
 private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with BackgroundTask {
 
@@ -53,7 +55,8 @@ private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with Backgr
 
 object ProtegeWorker {
 
-  private val activeWorkers = collection.mutable.ListBuffer[ProtegeWorker[_, Void]]()
+  //private val activeWorkers = collection.mutable.ListBuffer[ProtegeWorker[_, Void]]()
+  private val activeWorkers = ConcurrentHashMap.newKeySet[ProtegeWorker[_, Void]]().asScala
 
   private object nextInt {
     private[this] var n = 0
@@ -72,9 +75,7 @@ object ProtegeWorker {
     worker.addPropertyChangeListener((evt: PropertyChangeEvent) => {
       if evt.getPropertyName eq "state" then
         if evt.getNewValue.asInstanceOf[SwingWorker.StateValue] eq SwingWorker.StateValue.DONE then
-          activeWorkers.synchronized {
-            activeWorkers -= worker
-          }
+          activeWorkers -= worker
     })
     worker
   }
