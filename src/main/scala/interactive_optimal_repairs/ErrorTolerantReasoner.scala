@@ -13,14 +13,13 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration) {
 
   def isBravelyEntailed(queries: collection.Set[Query]): Boolean = {
     // entailmentProbability(queries) > 0f
-    if queries.forall(configuration.ontologyReasoner.entails) then
+    queries.forall(configuration.ontologyReasoner.entails) && {
       val subClassExpressions: collection.Set[OWLClassExpression] =
         queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
           configuration.request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
       val reasoner: ELReasoner = ELReasoner(queries, subClassExpressions, true)
       !configuration.request.axioms.exists(reasoner.entails)
-    else
-      false
+    }
   }
 
   def isCautiouslyEntailed(queries: collection.Set[Query]): Boolean = {

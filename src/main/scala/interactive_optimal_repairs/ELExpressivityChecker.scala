@@ -41,6 +41,8 @@ object ELExpressivityChecker {
       case ObjectPropertyAssertion(annotations, property, subject, target) =>
         annotations.foldLeft(true)(_ && checkAnnotation(_))
           && checkObjectPropertyExpression(property)
+      case _: OWLAnnotationAxiom =>
+        true
       case _ =>
         false
   }
@@ -109,6 +111,25 @@ object ELExpressivityChecker {
         case _ =>
           Set.empty[OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom]
       }
+  }
+
+  def getELFragment(ontology: OWLOntology): LazyList[OWLAxiom] = {
+    ontology.axioms(Imports.INCLUDED).toScala(LazyList).filter(checkAxiom)
+//      .flatMap {
+//        case SubClassOf(annotations, subClass, superClass) =>
+//          Set(SubClassOf(annotations, normalizeClassExpression(subClass), normalizeClassExpression(superClass)))
+//        case EquivalentClasses(annotations, operands) =>
+//          for (subClass <- operands; superClass <- operands if !(subClass equals superClass))
+//            yield SubClassOf(annotations, normalizeClassExpression(subClass), normalizeClassExpression(superClass))
+//        case ObjectPropertyDomain(annotations, property, filler) =>
+//          Set(SubClassOf(annotations, (property some OWLThing), normalizeClassExpression(filler)))
+//        case ClassAssertion(annotations, classExpression, individual) =>
+//          Set(ClassAssertion(annotations, normalizeClassExpression(classExpression), individual))
+////        case ObjectPropertyAssertion(annotations, property, subject, target) =>
+////          Set(ObjectPropertyAssertion(annotations, property, subject, target))
+//        case ax =>
+//          Set(ax)
+//      }
   }
 
 }

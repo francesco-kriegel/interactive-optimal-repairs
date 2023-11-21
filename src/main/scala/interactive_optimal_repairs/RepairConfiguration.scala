@@ -10,7 +10,7 @@ import scala.jdk.StreamConverters.*
 
 class RepairConfiguration(val axioms: collection.Set[OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom], val request: RepairRequest) {
 
-  val _subClassExpressions: collection.Set[OWLClassExpression] =
+  private val _subClassExpressions: collection.Set[OWLClassExpression] =
     axioms.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
       request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList)) // concat
       // repairRequest.axioms.collect {

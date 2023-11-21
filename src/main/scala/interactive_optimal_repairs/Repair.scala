@@ -5,7 +5,6 @@ import interactive_optimal_repairs.CompatibilityMode.*
 import interactive_optimal_repairs.IQSaturationNode.toShortDLString
 import interactive_optimal_repairs.QueryLanguage.*
 import interactive_optimal_repairs.Util.{ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, Nominal}
-import protege_components.Util.htmlParagraph
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
@@ -15,7 +14,7 @@ import scala.collection.mutable
 enum CompatibilityMode(val description: String) {
   case NO extends CompatibilityMode("Use anonymous individuals (default mode)")
   case FRESH_NAMED_INDIVIDUALS extends CompatibilityMode("Use fresh named individuals (compatibility mode)")
-  case EXPLICIT_NAMED_INDIVIDUALS extends CompatibilityMode(htmlParagraph("Use named individuals that indicate the pair in the formal construction (inspection mode, do not use in production)"))
+  case EXPLICIT_NAMED_INDIVIDUALS extends CompatibilityMode("Use named individuals that indicate the pair in the formal construction (inspection mode, do not use in production)")
 }
 
 object Repair {

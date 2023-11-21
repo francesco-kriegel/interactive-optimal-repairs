@@ -16,22 +16,25 @@ import java.awt.event.ActionEvent
 import java.util
 import java.util.{Collections, Comparator, List, Set}
 import javax.swing.*
-import javax.swing.event.DocumentEvent
+import javax.swing.event.{DocumentEvent, ListDataEvent, ListDataListener}
 import scala.reflect.ClassTag
 
 class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
                                                      rowLabel: String,
                                                      unexpectedAxiomException: () => OWLExpressionParserException = () => OWLExpressionParserException("Expected an OWL axiom", 0, 0, false, false, false, false, false, false, Collections.emptySet),
-                                                     getOWLExceptionIfAxiomIsNotAllowed: Ax => Option[OWLException] = (_: Ax) => None)
+                                                     getOWLExceptionIfAxiomIsNotAllowed: Ax => Option[OWLException] = (_: Ax) => None,
+                                                     orderedByInsertion: Boolean = true)
                                                     (using owlEditorKit: OWLEditorKit)
                                                     (implicit classTag_OrderedOWLAxiomListFrameSectionRow_Ax: ClassTag[OrderedOWLAxiomListFrameSectionRow[Ax]])
   extends OWLFrameList[java.util.Set[Ax]](owlEditorKit, OrderedOWLAxiomListFrame[Ax]()) {
 
   private val frame: OrderedOWLAxiomListFrame[Ax] = getFrame.asInstanceOf[OrderedOWLAxiomListFrame[Ax]]
   private val rowComparator: Comparator[OrderedOWLAxiomListFrameSectionRow[Ax]] =
-    (o1: OrderedOWLAxiomListFrameSectionRow[Ax], o2: OrderedOWLAxiomListFrameSectionRow[Ax]) => {
-      (axioms indexOf o1.getAxiom) - (axioms indexOf o2.getAxiom)
-    }
+    if orderedByInsertion then
+      (o1: OrderedOWLAxiomListFrameSectionRow[Ax], o2: OrderedOWLAxiomListFrameSectionRow[Ax]) => (axioms indexOf o1.getAxiom) - (axioms indexOf o2.getAxiom)
+    else
+      val owlObjectComparator = owlEditorKit.getOWLModelManager.getOWLObjectComparator
+      (o1: OrderedOWLAxiomListFrameSectionRow[Ax], o2: OrderedOWLAxiomListFrameSectionRow[Ax]) => owlObjectComparator.compare(o1.getAxiom, o2.getAxiom)
   frame.addSection(OrderedOWLAxiomListFrameSection(label, rowLabel, frame, rowComparator));
 
   override def handleDelete(): Unit = super.handleDelete() // revert to public access to avoid compiling error
@@ -167,28 +170,46 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
   def add(axiom: Ax) = {
     if (!axioms.contains(axiom))
       axioms.add(axiom)
+      val index = axioms.indexOf(axiom)
+      listDataListeners.foreach(_.intervalAdded(ListDataEvent(this, ListDataEvent.INTERVAL_ADDED, index, index)))
     refresh()
   }
 
   def replace(oldAxiom: Ax, newAxiom: Ax) = {
-    axioms.set(axioms.indexOf(oldAxiom), newAxiom)
+    val index = axioms.indexOf(oldAxiom)
+    axioms.set(index, newAxiom)
+    listDataListeners.foreach(_.contentsChanged(ListDataEvent(this, ListDataEvent.CONTENTS_CHANGED, index, index)))
     refresh()
   }
 
   def remove(axiom: Ax) = {
+    val index = axioms.indexOf(axiom)
     axioms.remove(axiom)
+    listDataListeners.foreach(_.intervalRemoved(ListDataEvent(this, ListDataEvent.INTERVAL_REMOVED, index, index)))
     refresh()
   }
 
   def clear() = {
+    val length = axioms.size()
     axioms.clear()
+    listDataListeners.foreach(_.intervalRemoved(ListDataEvent(this, ListDataEvent.INTERVAL_REMOVED, 0, length - 1)))
     refresh()
   }
 
   def set(content: java.util.Collection[Ax]) = {
     axioms.clear()
     axioms.addAll(content)
+    val length = axioms.size()
+    listDataListeners.foreach(_.contentsChanged(ListDataEvent(this, ListDataEvent.CONTENTS_CHANGED, 0, length - 1)))
     refresh()
+  }
+
+  def isEmpty(): Boolean = {
+    axioms.isEmpty
+  }
+
+  def length(): Int = {
+    axioms.size()
   }
 
   def forEach(consumer: Ax => Unit) = {
@@ -200,9 +221,30 @@ class OrderedOWLAxiomList[Ax <: OWLAxiom : ClassTag](label: String,
   }
 
   override def dispose() = {
-    axioms.clear()
     maybeWorker.foreach(_.cancel(true))
+    listDataListeners.clear()
+    axioms.clear()
     super.dispose()
+  }
+
+  private val listDataListeners = collection.mutable.HashSet[ListDataListener]()
+
+  def addListDataListener(l: ListDataListener): Unit = {
+    if l != null then listDataListeners += l
+  }
+
+  def addListDataListener(processEvent: ListDataEvent => Unit): ListDataListener = {
+    val l = new ListDataListener() {
+      def contentsChanged(e: ListDataEvent): Unit = processEvent(e)
+      def intervalAdded(e: ListDataEvent): Unit = processEvent(e)
+      def intervalRemoved(e: ListDataEvent): Unit = processEvent(e)
+    }
+    addListDataListener(l)
+    l
+  }
+
+  def removeListDataListener(l: ListDataListener): Unit = {
+    if l != null then listDataListeners -= l
   }
 
 }

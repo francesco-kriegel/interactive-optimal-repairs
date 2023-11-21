@@ -142,6 +142,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
             (terminologyReasoner: ElkReasoner, ontologyReasoner: ElkReasoner) => {
               nextButton.enableWithSingleActionListener(_ => {
                 /* State 0: Repair Request */
+                nextButton.setEnabled(false)
                 panel.removeAll()
                 panel.add(breakingJLabel("Please specify the unwanted consequences for which the active ontology is to be repaired.  Currently only 𝓔𝓛 concept assertions (a Type: C) and role assertions (a Fact: r b) are supported.  Support will be extended towards Horn-𝓐𝓛𝓒𝓡𝓞𝓘 as well as concept inclusions (C SubClassOf: D) in a future version."), BorderLayout.NORTH)
                 val repairRequestAxiomList: OrderedOWLAxiomList[Query] =
@@ -153,17 +154,17 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       else if !ontologyReasoner.isEntailed(ax) then Some(OWLException("The axiom is not entailed by the active ontology and thus need not be repaired for."))
                       else None
                     })
+                repairRequestAxiomList.addListDataListener(_ => { nextButton.setEnabled(!repairRequestAxiomList.isEmpty()) })
                 panel.add(repairRequestAxiomList, BorderLayout.CENTER)
                 panel.revalidate()
                 panel.repaint()
-                nextButton.enableWithSingleActionListener(_ => {
+                nextButton.setSingleActionListener(_ => {
                   /* State 1: Interaction Strategy */
                   nextButton.setEnabled(false)
                   panel.removeAll()
                   terminologyReasoner.dispose()
                   ontologyReasoner.dispose()
-                  val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(s.toString), s)).toMap
-                  // strategyRadioButtons.foreach { case (button, Strategy.SMART) => button.setEnabled(false); case _ => {} }
+                  val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(htmlParagraph("<b>" + s.name + "</b> (" + s.description + ")")), s)).toMap
                   val strategyRadioButtonGroup = ButtonGroup()
                   strategyRadioButtons.keys.foreach(strategyRadioButtonGroup.add)
                   val strategyRadioButtonPanel = JPanel()
@@ -183,13 +184,13 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                     val repairRequest = RepairRequest(unwantedConsequences: _*)
                     val strategy = strategyRadioButtons.keys.find(_.isSelected).map(strategyRadioButtons).get
 
-                    given repairConfiguration: RepairConfiguration =
-                      RepairConfiguration(ELExpressivityChecker.getELAxioms(activeOntology).toSet, repairRequest)
-                    whenDialogClosed { repairConfiguration.dispose() }
-
                     asynchronouslyInNewWorker {
-                      UserInteraction(strategy)
-                    } executeAndThen { userInteraction =>
+                      RepairConfiguration(ELExpressivityChecker.getELAxioms(activeOntology).toSet, repairRequest)
+                    } executeAndThen { _repairConfiguration =>
+
+                      given repairConfiguration: RepairConfiguration = _repairConfiguration
+                      whenDialogClosed { repairConfiguration.dispose() }
+                      val userInteraction = UserInteraction(strategy)
 
                       def lock(list: OrderedOWLAxiomList[Query]) = {
                         list.isEditable = false
@@ -240,6 +241,45 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                             } executeAndThen { _ => unlock(list) }
                           })
 
+                      def newInheritedAcceptButton(list: OrderedOWLAxiomList[Query], query: Query) =
+                        TextMListButton(
+                          "Confirm inherited accept answer",
+                          Color.GREEN.darker(),
+                          "\u2713",
+                          14,
+                          _ => {
+                            lock(list)
+                            asynchronouslyInNewWorker("Processing user answer INHERITED_ACCEPT to query " + query) {
+                              userInteraction.receiveAnswer(query, INHERITED_ACCEPT)
+                            } executeAndThen { _ => unlock(list) }
+                          })
+
+                      def newInheritedDeclineButton(list: OrderedOWLAxiomList[Query], query: Query) =
+                        TextMListButton(
+                          "Confirm inherited decline answer",
+                          Color.RED.darker(),
+                          "\u2715",
+                          15,
+                          _ => {
+                            lock(list)
+                            asynchronouslyInNewWorker("Processing user answer INHERITED_DECLINE to query " + query) {
+                              userInteraction.receiveAnswer(query, INHERITED_DECLINE)
+                            } executeAndThen { _ => unlock(list) }
+                          })
+
+                      def newRollbackButton(list: OrderedOWLAxiomList[Query], query: Query) =
+                        TextMListButton(
+                          "Rollback",
+                          Color.BLUE.darker(),
+                          "\u293a", // "\u238c"
+                          28,
+                          _ => {
+                            lock(list)
+                            asynchronouslyInNewWorker("Processing user answer ROLLBACK to query " + query) {
+                              userInteraction.receiveAnswer(query, ROLLBACK)
+                            } executeAndThen { _ => unlock(list) }
+                          })
+
                       val repairSeedInteractionAxiomList: OrderedOWLAxiomList[Query] =
                         new OrderedOWLAxiomList[Query]("Questions", "Question") {
                           override protected def getButtons(value: Object): java.util.List[MListButton] = {
@@ -249,15 +289,21 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                                   case ACCEPT => newAcceptButton(this, row.getAxiom)
                                   case IGNORE => newIgnoreButton(this, row.getAxiom)
                                   case DECLINE => newDeclineButton(this, row.getAxiom)
+                                  case INHERITED_ACCEPT => newInheritedAcceptButton(this, row.getAxiom)
+                                  case INHERITED_DECLINE => newInheritedDeclineButton(this, row.getAxiom)
+                                  case ROLLBACK => newRollbackButton(this, row.getAxiom)
                                 }).toList.asJava
                               case _ => Collections.emptyList()
                           }
                         }
                       repairSeedInteractionAxiomList.isEditable = true
 
-                      val user = new User() {
+                      val userInterface = new UserInterface() {
                         override def showQuestion(query: Query): Unit =
-                          invokeLaterOnProtegeThread { repairSeedInteractionAxiomList.add(query) }
+                          invokeLaterOnProtegeThread {
+                            println("New query: " + query)
+                            repairSeedInteractionAxiomList.add(query)
+                          }
                         override def removeQuestion(query: Query): Unit =
                           invokeLaterOnProtegeThread { repairSeedInteractionAxiomList.remove(query) }
                       }
@@ -268,12 +314,13 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       panel.repaint()
 
                       asynchronouslyInNewWorker("User interaction is running...") {
-                        userInteraction.start(user)
+                        userInteraction.start(userInterface)
                         while !userInteraction.hasBeenCompleted() do Thread.sleep(1000)
                         userInteraction.dispose()
                         userInteraction.getRepairSeed()
                       } inParallelWith asynchronouslyInNewWorker("Checking if the input ontology is acyclic...") {
-                        IQSaturation().isAcyclic
+                        // IQSaturation().isAcyclic
+                        false
                       } executeAndThen {
                         (repairSeed, isAcyclic) => {
                           nextButton.enableWithSingleAction {
@@ -289,7 +336,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                             queryLanguageRadioButtonPanel.setLayout(BoxLayout(queryLanguageRadioButtonPanel, BoxLayout.Y_AXIS))
                             queryLanguageRadioButtons.keys.foreach(queryLanguageRadioButtonPanel.add)
 
-                            val compatibilityModeRadioButtons = CompatibilityMode.values.map(s => (JRadioButton(s.description), s)).toMap
+                            val compatibilityModeRadioButtons = CompatibilityMode.values.map(s => (JRadioButton(htmlParagraph(s.description)), s)).toMap
                             val compatibilityModeRadioButtonGroup = ButtonGroup()
                             compatibilityModeRadioButtons.keys.foreach(compatibilityModeRadioButtonGroup.add)
                             val compatibilityModeRadioButtonPanel = JPanel()
@@ -317,7 +364,6 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 
                             // queryLanguageRadioButtons.foreach { case (button, QueryLanguage.IRQ) => button.setSelected(true); case (button, _) => button.setEnabled(false) }
                             queryLanguageRadioButtons.foreach { case (button, QueryLanguage.CQ) => button.setEnabled(false); case _ => {} }
-                            nextButton.setEnabled(true)
 
                             panel.revalidate()
                             panel.repaint()
