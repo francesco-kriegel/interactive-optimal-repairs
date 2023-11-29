@@ -5,10 +5,12 @@ import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Util.{CoverageReasonerRequest, ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, maximalElements, minimalElements}
 
 import org.phenoscape.scowl.*
+import org.semanticweb.owlapi.model.parameters.Imports
 import org.semanticweb.owlapi.model.{OWLClassExpression, OWLIndividual}
 
 import scala.collection
 import scala.collection.{immutable, mutable}
+import scala.jdk.CollectionConverters.*
 import scala.util.hashing.MurmurHash3
 
 class RepairType(val node: IQSaturationNode, val atoms: Set[OWLClassExpression])(using configuration: RepairConfiguration) {
@@ -99,15 +101,50 @@ object RepairType {
 //    classExpressions.filter(c => !classExpressions.exists(c isSubsumedBy _ wrt configuration.trivialReasoner))
   }
 
-  def premises(node: IQSaturationNode, atom: OWLClassExpression)(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
+  inline def premises(node: IQSaturationNode, atom: OWLClassExpression)(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
+    premisesV3(node, atom)
+  }
+
+  def premisesV1(node: IQSaturationNode, atom: OWLClassExpression)(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
     val types =
       node match
         case individual: OWLIndividual => Set.from(configuration.ontologyReasoner.types(individual))
         case classExpression: OWLClassExpression => Set.from(configuration.ontologyReasoner.subsumers(classExpression))
-    val subsumees = configuration.ontologyReasoner.subsumees(atom)
-    configuration.axioms.collect {
+    val subsumees = Set.from(configuration.ontologyReasoner.subsumees(atom))
+    configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala.collect {
       case SubClassOf(_, premise, conclusion) if (subsumees contains conclusion) && (types contains premise) => premise
     }
+  }
+
+  private val premisesV2Map = mutable.HashMap[(IQSaturationNode, OWLClassExpression), collection.Set[OWLClassExpression]]()
+
+  def premisesV2(node: IQSaturationNode, atom: OWLClassExpression)(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
+    premisesV2Map.getOrElseUpdate((node, atom), {
+      println()
+      print("Computing premises for " + node + " and " + atom)
+      node match
+        case individual: OWLIndividual =>
+          configuration.conceptInclusions filter { axiom =>
+            configuration.ontologyReasoner.isInstanceOf(individual, axiom.getSubClass)
+              && configuration.ontologyReasoner.isSubsumedBy(axiom.getSuperClass, atom)
+          } map { _.getSubClass }
+        case classExpression: OWLClassExpression =>
+          configuration.conceptInclusions filter { axiom =>
+            configuration.ontologyReasoner.isSubsumedBy(classExpression, axiom.getSubClass)
+              && configuration.ontologyReasoner.isSubsumedBy(axiom.getSuperClass, atom)
+          } map { _.getSubClass }
+    })
+  }
+
+  def premisesV3(node: IQSaturationNode, atom: OWLClassExpression)(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
+    println()
+    print("Computing premises for " + node + " and " + atom)
+    val isSubsumedByAtom = configuration.ontologyReasoner.subsumees(atom).toSet
+    node match
+      case individual: OWLIndividual =>
+        configuration.ontologyReasoner.types(individual).filter({ configuration.conceptInclusionsMap.getOrElse(_, Set.empty) exists isSubsumedByAtom }).toSet
+      case classExpression: OWLClassExpression =>
+        configuration.ontologyReasoner.subsumers(classExpression).filter({ configuration.conceptInclusionsMap.getOrElse(_, Set.empty) exists isSubsumedByAtom }).toSet
   }
 
 //  @Deprecated // Does not always return a minimal repair type!

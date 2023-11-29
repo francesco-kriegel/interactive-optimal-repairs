@@ -8,7 +8,7 @@ import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLClassExpression,
 
 import scala.collection.mutable
 
-class RepairSeed(protected[interactive_optimal_repairs] val preprocessed: Boolean = false, protected[interactive_optimal_repairs] val axioms: collection.Set[OWLClassAssertionAxiom])(using configuration: RepairConfiguration) {
+class RepairSeed(protected[interactive_optimal_repairs] val preprocessed: Boolean = false, protected[interactive_optimal_repairs] val axioms: Iterable[OWLClassAssertionAxiom])(using configuration: RepairConfiguration) {
 
   def this(preprocessed: Boolean, axioms: OWLClassAssertionAxiom*)(using configuration: RepairConfiguration) = this(preprocessed, axioms.toSet)
 

@@ -6,8 +6,10 @@ import interactive_optimal_repairs.Util.{ImplicitOWLClassExpression, ImplicitOWL
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
+import org.semanticweb.owlapi.model.parameters.Imports
 
 import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 
 trait Saturation[N >: OWLIndividual](using configuration: RepairConfiguration) {
 
@@ -26,7 +28,7 @@ trait Saturation[N >: OWLIndividual](using configuration: RepairConfiguration) {
     val isOnStack = mutable.HashSet[N]()
     val remainingNodes = mutable.HashSet[N]()
 
-    configuration.axioms.foreach {
+    configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala.foreach {
       case ClassAssertion(_, _, individual) =>
         remainingNodes += individual
       case ObjectPropertyAssertion(_, _, subject, target) =>
@@ -109,27 +111,33 @@ class IQSaturation(using configuration: RepairConfiguration) extends Saturation[
   extension (node: IQSaturationNode) {
     infix def hasType(classExpression: OWLClassExpression)(using configuration: RepairConfiguration): Boolean = {
       node match
-        case individualNode: OWLIndividual => configuration.ontologyReasoner.types(individualNode) contains classExpression
-        case classExpressionNode: OWLClassExpression => configuration.ontologyReasoner.subsumers(classExpressionNode) contains classExpression
+        case individualNode: OWLIndividual =>
+          // configuration.ontologyReasoner.types(individualNode) contains classExpression
+          configuration.ontologyReasoner.isInstanceOf(individualNode, classExpression)
+        case classExpressionNode: OWLClassExpression =>
+          // configuration.ontologyReasoner.subsumers(classExpressionNode) contains classExpression
+          configuration.ontologyReasoner.isSubsumedBy(classExpressionNode, classExpression)
     }
   }
 
   private val tboxSuccessors = mutable.HashMap[OWLClassExpression, mutable.HashSet[(OWLObjectProperty, OWLClassExpression)]]()
-  configuration.axioms.foreach {
+  configuration.conceptInclusions.foreach {
     case SubClassOf(_, subClass, superClass) =>
-      tboxSuccessors.getOrElseUpdate(subClass, {
-        mutable.HashSet[(OWLObjectProperty, OWLClassExpression)]()
-      }) ++= superClass.topLevelConjuncts().collect { case ObjectSomeValuesFrom(property@ObjectProperty(_), filler) => (property, filler) }
+      tboxSuccessors.getOrElseUpdate(subClass, { mutable.HashSet[(OWLObjectProperty, OWLClassExpression)]() })
+        ++= superClass.topLevelConjuncts().collect { case ObjectSomeValuesFrom(property@ObjectProperty(_), filler) => (property, filler) }
     case _ => // Do nothing.
   }
 
   override def getSuccessors(node: IQSaturationNode): Iterable[(OWLObjectProperty, IQSaturationNode)] = {
     node match
       case individual: OWLIndividual =>
-        configuration.axioms.collect[(OWLObjectProperty, IQSaturationNode)] {
-          case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject, target) if subject equals individual => (property, target)
-          case ClassAssertion(_, ObjectSomeValuesFrom(property@ObjectProperty(_), filler), jndividual) if individual equals jndividual => (property, filler)
-        } ++ configuration.ontologyReasoner.types(individual).filter(tboxSuccessors.keySet).flatMap(tboxSuccessors)
+//        configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala.collect[(OWLObjectProperty, IQSaturationNode)] {
+//          case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject, target) if subject equals individual => (property, target)
+//          case ClassAssertion(_, ObjectSomeValuesFrom(property@ObjectProperty(_), filler), jndividual) if individual equals jndividual => (property, filler)
+//        } ++ configuration.ontologyReasoner.types(individual).filter(tboxSuccessors.keySet).flatMap(tboxSuccessors)
+        configuration.ontology.getObjectPropertyAssertionAxioms(individual).asScala.map({ case ObjectPropertyAssertion(_, property@ObjectProperty(_), _, target) => (property, target) }) ++
+          configuration.ontology.getClassAssertionAxioms(individual).asScala.flatMap({ case ClassAssertion(_, classExpression, _) => classExpression.asConjunctSet().asScala.filter(_.isObjectSomeValuesFrom).map({ case ObjectSomeValuesFrom(property@ObjectProperty(_), filler) => (property, filler) }) }) ++
+          configuration.ontologyReasoner.types(individual).filter(tboxSuccessors.keySet).flatMap(tboxSuccessors)
       case classExpression: OWLClassExpression =>
         classExpression.topLevelConjuncts().collect[(OWLObjectProperty, IQSaturationNode)] {
           case ObjectSomeValuesFrom(property@ObjectProperty(_), filler) => (property, filler)
@@ -172,18 +180,25 @@ class NoSaturation(using configuration: RepairConfiguration) extends Saturation[
   extension (node: IQSaturationNode) {
     infix def hasType(classExpression: OWLClassExpression)(using configuration: RepairConfiguration): Boolean = {
       node match
-        case individualNode: OWLIndividual => configuration.trivialReasoner.types(individualNode) contains classExpression
-        case classExpressionNode: OWLClassExpression => configuration.trivialReasoner.subsumers(classExpressionNode) contains classExpression
+        case individualNode: OWLIndividual =>
+          // configuration.trivialReasoner.types(individualNode) contains classExpression
+          configuration.trivialReasoner.isInstanceOf(individualNode, classExpression)
+        case classExpressionNode: OWLClassExpression =>
+          // configuration.trivialReasoner.subsumers(classExpressionNode) contains classExpression
+          configuration.trivialReasoner.isSubsumedBy(classExpressionNode, classExpression)
     }
   }
 
   override def getSuccessors(node: IQSaturationNode): Iterable[(OWLObjectProperty, IQSaturationNode)] = {
     node match
       case individual: OWLIndividual =>
-        configuration.axioms.collect {
-          case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject, target) if subject equals individual => (property, target)
-          case ClassAssertion(_, ObjectSomeValuesFrom(property@ObjectProperty(_), filler), jndividual) if individual equals jndividual => (property, filler)
-        }
+//        /* TODO: Make the below method more efficient by employing the indexes maintained by the OWLAPI in `configuration.ontology` */
+//        configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala.collect {
+//          case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject, target) if subject equals individual => (property, target)
+//          case ClassAssertion(_, ObjectSomeValuesFrom(property@ObjectProperty(_), filler), jndividual) if individual equals jndividual => (property, filler)
+//        }
+        configuration.ontology.getObjectPropertyAssertionAxioms(individual).asScala.map({ case ObjectPropertyAssertion(_, property@ObjectProperty(_), _, target) => (property, target) }) ++
+          configuration.ontology.getClassAssertionAxioms(individual).asScala.flatMap({ case ClassAssertion(_, classExpression, _) => classExpression.asConjunctSet().asScala.filter(_.isObjectSomeValuesFrom).map({ case ObjectSomeValuesFrom(property@ObjectProperty(_), filler) => (property, filler) }) })
       case classExpression: OWLClassExpression =>
         classExpression.topLevelConjuncts().collect {
           case ObjectSomeValuesFrom(property@ObjectProperty(_), filler) => (property, filler)
@@ -193,9 +208,10 @@ class NoSaturation(using configuration: RepairConfiguration) extends Saturation[
   override def getLabels(node: IQSaturationNode): Iterable[OWLClass] = {
     node match
       case individual: OWLIndividual =>
-        configuration.axioms.collect {
-          case ClassAssertion(_, clazz @ Class(_), jndividual) if individual equals jndividual => clazz
-        }
+//        configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala.collect {
+//          case ClassAssertion(_, clazz @ Class(_), jndividual) if individual equals jndividual => clazz
+//        }
+        configuration.ontology.getClassAssertionAxioms(individual).asScala.flatMap({ case ClassAssertion(_, classExpression, _) => classExpression.asConjunctSet().asScala.filter(_.isClass).map(_.asOWLClass) })
       case classExpression: OWLClassExpression =>
         classExpression.topLevelConjuncts().filter(_.isClass).map(_.asOWLClass())
   }

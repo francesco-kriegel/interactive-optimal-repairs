@@ -8,8 +8,10 @@ import interactive_optimal_repairs.Util.{ImplicitIterableOfOWLClassExpressions, 
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
+import org.semanticweb.owlapi.model.parameters.Imports
 
 import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 
 enum CompatibilityMode(val description: String) {
   case NO extends CompatibilityMode("Use anonymous individuals (default mode)")
@@ -30,15 +32,16 @@ object Repair {
 
 trait Repair(val seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration) {
 
+  private lazy val saturation = if saturated then IQSaturation() else ???
+
   def entails(query: Query): Boolean = {
     if saturated then
-      val saturation = IQSaturation()
       query match
         case classAssertion @ ClassAssertion(_, classExpression, individual @ NamedIndividual(_)) if ELExpressivityChecker.checkClassExpression(classExpression) =>
           (configuration.ontologyReasoner entails classAssertion)
             && !(classExpression isCoveredBy seed(individual) wrt configuration.ontologyReasoner)
         case roleAssertion @ ObjectPropertyAssertion(_, property @ ObjectProperty(_), subject @ NamedIndividual(_), target @ NamedIndividual(_)) =>
-          (configuration.axioms contains roleAssertion)
+          (configuration.ontology containsAxiom roleAssertion)
             && !(configuration.request.axioms contains roleAssertion)
             && (saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner)
         case _ => ???
@@ -55,19 +58,16 @@ class IQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration:
   override def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology = {
     val saturation = if saturated then IQSaturation() else NoSaturation()
     val repair = ontologyManager.createOntology()
-    configuration.axioms.foreach {
-      case subClassOfAxiom: OWLSubClassOfAxiom => ontologyManager.addAxiom(repair, subClassOfAxiom)
-      case _ => // Do nothing.
-    }
+    ontologyManager.addAxioms(repair, configuration.ontology.getTBoxAxioms(Imports.INCLUDED))
     val factory = CopiedOWLIndividual.FactoryIQ(compatibilityMode)
     val queue = mutable.Queue[CopiedOWLIndividual]()
-    configuration.axioms foreach {
+    configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala foreach {
       case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
         if saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner then
           ontologyManager.addAxiom(repair, subject Fact (property, target))
       case _ => // Do nothing.
     }
-    configuration.ontologyReasoner.instances(OWLThing).distinct
+    configuration.ontologyReasoner.instances(OWLThing)//.distinct
       .map(individual => factory.getCopyOrElseCreateCopyWithNamedIndividual(individual, seed.getRepairType(individual)))
       .foreach(queue.enqueue)
     while queue.nonEmpty do
@@ -99,10 +99,10 @@ class IRQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration
         val nominal = Nominal(target)
         val successor = property some nominal
         newAxioms += (subject Type successor) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-        configuration.trivialReasoner.addRepresentative(nominal)
-        configuration.trivialReasoner.addRepresentative(successor)
-        configuration.ontologyReasoner.addRepresentative(nominal)
-        configuration.ontologyReasoner.addRepresentative(successor)
+        configuration.trivialReasoner.addClassExpression(nominal)
+        configuration.trivialReasoner.addClassExpression(successor)
+        configuration.ontologyReasoner.addClassExpression(nominal)
+        configuration.ontologyReasoner.addClassExpression(successor)
       case _ => // Do nothing.
     }
     RepairSeed(seed.preprocessed, newAxioms)

@@ -10,9 +10,11 @@ import org.protege.editor.core.ui.list.MListButton
 import org.protege.editor.owl.OWLEditorKit
 import org.protege.editor.owl.model.classexpression.OWLExpressionParserException
 import org.protege.editor.owl.ui.view.AbstractOWLViewComponent
-import org.semanticweb.elk.owlapi.{ElkReasoner, ElkReasonerFactory}
+import org.semanticweb.elk.owlapi.ElkReasonerFactory
+import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.Imports
+import org.semanticweb.owlapi.reasoner.InferenceType
 
 import java.awt.*
 import java.awt.event.{WindowEvent, WindowListener}
@@ -59,6 +61,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 
   private def startUserInteraction(): Unit = {
 
+    given ontologyManager: OWLOntologyManager = OWLManager.createOWLOntologyManager() // getOWLModelManager.getOWLOntologyManager
     val activeOntology = getOWLModelManager.getActiveOntology
 
     // The following workaround is necessary since a method `setMutable(mutable: Boolean)` is not available in class `org.protege.editor.owl.model.OWLModelManager`.
@@ -122,29 +125,33 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 
         if isSupported then {
 
-          given ontologyManager: OWLOntologyManager = getOWLModelManager.getOWLOntologyManager
-          given owlEditorKit: OWLEditorKit = getOWLEditorKit()
-
           asynchronouslyInNewWorker {
-            val terminology = getOWLModelManager.getOWLOntologyManager.createOntology(activeOntology.getTBoxAxioms(Imports.INCLUDED))
-            val terminologyReasoner = ElkReasonerFactory().createNonBufferingReasoner(terminology)
-            whenDialogClosed { terminologyReasoner.dispose() }
-            terminologyReasoner.precomputeInferences()
+            val terminology = ontologyManager.createOntology(activeOntology.getTBoxAxioms(Imports.INCLUDED))
+            val terminologyReasoner = ElkReasonerFactory().createReasoner(terminology)
+            whenDialogClosed {
+              terminologyReasoner.dispose()
+              ontologyManager.removeOntology(terminology)
+            }
             terminologyReasoner.flush()
-            terminologyReasoner
+            terminologyReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
+            (terminology, terminologyReasoner)
           } inParallelWith asynchronouslyInNewWorker {
-            val ontologyReasoner = ElkReasonerFactory().createNonBufferingReasoner(activeOntology)
-            whenDialogClosed { ontologyReasoner.dispose() }
-            ontologyReasoner.precomputeInferences()
+            val ontologyReasoner = ElkReasonerFactory().createReasoner(activeOntology)
+            whenDialogClosed {
+              ontologyReasoner.dispose()
+            }
             ontologyReasoner.flush()
+            ontologyReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
             ontologyReasoner
           } executeAndThen {
-            (terminologyReasoner: ElkReasoner, ontologyReasoner: ElkReasoner) => {
+            case ((terminology, terminologyReasoner), ontologyReasoner) => {
               nextButton.enableWithSingleActionListener(_ => {
                 /* State 0: Repair Request */
                 nextButton.setEnabled(false)
                 panel.removeAll()
                 panel.add(breakingJLabel("Please specify the unwanted consequences for which the active ontology is to be repaired.  Currently only 𝓔𝓛 concept assertions (a Type: C) and role assertions (a Fact: r b) are supported.  Support will be extended towards Horn-𝓐𝓛𝓒𝓡𝓞𝓘 as well as concept inclusions (C SubClassOf: D) in a future version."), BorderLayout.NORTH)
+
+                given owlEditorKit: OWLEditorKit = getOWLEditorKit()
                 val repairRequestAxiomList: OrderedOWLAxiomList[Query] =
                   OrderedOWLAxiomList[Query]("Repair Request", "Unwanted Consequence",
                     () => OWLExpressionParserException("Currently only 𝓔𝓛 concept assertions (a Type: C) and role assertions (a Fact: r b) are supported.", 0, 0, false, false, false, false, false, false, Collections.emptySet),
@@ -155,7 +162,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       else None
                     })
                 repairRequestAxiomList.addListDataListener(_ => { nextButton.setEnabled(!repairRequestAxiomList.isEmpty()) })
-                panel.add(repairRequestAxiomList, BorderLayout.CENTER)
+                panel.add(JScrollPane(repairRequestAxiomList, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER), BorderLayout.CENTER)
                 panel.revalidate()
                 panel.repaint()
                 nextButton.setSingleActionListener(_ => {
@@ -163,6 +170,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                   nextButton.setEnabled(false)
                   panel.removeAll()
                   terminologyReasoner.dispose()
+                  ontologyManager.removeOntology(terminology)
                   ontologyReasoner.dispose()
                   val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(htmlParagraph("<b>" + s.name + "</b> (" + s.description + ")")), s)).toMap
                   val strategyRadioButtonGroup = ButtonGroup()
@@ -185,7 +193,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                     val strategy = strategyRadioButtons.keys.find(_.isSelected).map(strategyRadioButtons).get
 
                     asynchronouslyInNewWorker {
-                      RepairConfiguration(ELExpressivityChecker.getELAxioms(activeOntology).toSet, repairRequest)
+                      RepairConfiguration(activeOntology, repairRequest)
                     } executeAndThen { _repairConfiguration =>
 
                       given repairConfiguration: RepairConfiguration = _repairConfiguration
@@ -309,7 +317,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       }
 
                       panel.add(breakingJLabel("Please carefully assess each of the below axioms.  More specifically, please accept each valid axiom and decline each invalid axiom.  If you are unsure, you could also ignore some axioms, but then the repair might not be satisfactory.  After all questions have been considered, the induced optimal repair will be computed by clicking the below button."), BorderLayout.NORTH)
-                      panel.add(repairSeedInteractionAxiomList, BorderLayout.CENTER)
+                      panel.add(JScrollPane(repairSeedInteractionAxiomList, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER), BorderLayout.CENTER)
                       panel.revalidate()
                       panel.repaint()
 
@@ -319,8 +327,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                         userInteraction.dispose()
                         userInteraction.getRepairSeed()
                       } inParallelWith asynchronouslyInNewWorker("Checking if the input ontology is acyclic...") {
-                        // IQSaturation().isAcyclic
-                        false
+                        IQSaturation().isAcyclic
                       } executeAndThen {
                         (repairSeed, isAcyclic) => {
                           nextButton.enableWithSingleAction {

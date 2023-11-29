@@ -4,6 +4,7 @@ package interactive_optimal_repairs
 import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 
 import org.phenoscape.scowl.*
+import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model.*
 
 import scala.jdk.CollectionConverters.*
@@ -79,8 +80,8 @@ object Util {
       CoverageReasonerRequest(Set(classExpression), others.atoms, true)
 
     lazy val reduced: OWLClassExpression = {
-      val reasoner =
-        ELReasoner(Set.empty, classExpression.nestedClassExpressions().toScala(LazyList), true)
+      given ontologyManager: OWLOntologyManager = OWLManager.createOWLOntologyManager() // TODO
+      val reasoner = ELReasoner(Set.empty, classExpression.getNestedClassExpressions.asScala, true)
       val reduction =
         if (classExpression subsumes OWLThing wrt reasoner)
           OWLThing

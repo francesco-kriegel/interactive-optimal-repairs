@@ -167,7 +167,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
   }
 
   override protected def initialize(): Unit = {
-    configuration.axioms.foreach {
+    configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala.foreach {
       case roleAssertion: OWLObjectPropertyAssertionAxiom => nonDeclinedRoleAssertions += roleAssertion
       case _ => // Do nothing.
     }
@@ -235,12 +235,9 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
     val unsaturatedRepair = IQRepair(seed, false)
     val unsaturatedRepairReasoner =
       ELReasoner(
-        unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS).getAxioms(Imports.INCLUDED).asScala.collect {
-          case classAssertion: OWLClassAssertionAxiom => classAssertion
-          case propertyAssertion: OWLObjectPropertyAssertionAxiom => propertyAssertion
-          case classInclusion: OWLSubClassOfAxiom => classInclusion
-        },
-        configuration.subClassExpressions)
+        unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS).getAxioms(Imports.INCLUDED).asScala.asInstanceOf[collection.Set[ELAxiom]],
+        configuration.subClassExpressions,
+        false)
 
     for {
       individual <- configuration.ontologyReasoner.instances(OWLThing)
@@ -291,10 +288,12 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
 
 class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends UserInteraction() {
 
+  println("Initializing smart user interaction v2")
+
   private val isCurrentlyProcessing = AtomicInteger(0)
   @volatile private var inPhase2 = false
 
-  private val roleAssertions = configuration.axioms collect { case ax: OWLObjectPropertyAssertionAxiom => ax }
+  private val roleAssertions = configuration.ontology.getAxioms(AxiomType.OBJECT_PROPERTY_ASSERTION).asScala
 
   private val pendingQueries = ConcurrentHashMap.newKeySet[Query]().asScala
   private val acceptedQueries = ConcurrentHashMap.newKeySet[Query]().asScala
@@ -303,7 +302,7 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 
   private val acceptedQueriesReasoner =
     ELReasoner(
-      configuration.axioms collect { case ax: OWLSubClassOfAxiom => ax },
+      configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala,
       configuration.subClassExpressions,
       false
     )
@@ -335,30 +334,32 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
     asynchronouslyInNewWorker {
       while !((isCurrentlyProcessing.get() equals 0) && pendingQueries.isEmpty) do Thread.sleep(100)
     } executeAndThen {
-      println("Initializing phase 2 ...")
-      initializePhase2()
-      inPhase2 = true
-      println("Phase 2 running ...")
+      asynchronouslyInNewWorker {
+        println("Initializing phase 2 ...")
+        initializePhase2()
+        inPhase2 = true
+        println("Phase 2 running ...")
+      }.execute
     }
   }
 
   private def initializePhase2(): Unit = {
+    println("Initializing saturated and unsaturated repair")
     val seed = getRepairSeedUnchecked()
     val saturatedRepair = IQRepair(seed, true)
     val unsaturatedRepair = IQRepair(seed, false)
+    val unsaturatedRepairComputed = unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS)
+    println("Initializing unsaturated repair reasoner")
     val unsaturatedRepairReasoner =
       ELReasoner(
-        unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS).getAxioms(Imports.INCLUDED).asScala.collect {
-          case classAssertion: OWLClassAssertionAxiom => classAssertion
-          case propertyAssertion: OWLObjectPropertyAssertionAxiom => propertyAssertion
-          case classInclusion: OWLSubClassOfAxiom => classInclusion
-        },
-        configuration.subClassExpressions)
-
+        unsaturatedRepairComputed,
+        configuration.subClassExpressions,
+        false)
+    println("Identifying questions")
     for {
       individual <- configuration.ontologyReasoner.instances(OWLThing)
       // classExpression <- minimalElements(configuration.ontologyReasoner.types(individual), _ isSubsumedBy _ wrt configuration.trivialReasoner)
-      classExpression <- configuration.ontologyReasoner.types(individual)
+      classExpression <- configuration.ontologyReasoner.types(individual).filter(_.isAtom)
     }
       val query = individual Type classExpression
       if isUndecided(query) && (saturatedRepair entails query) && !(unsaturatedRepairReasoner entails query) then
@@ -519,13 +520,13 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 }
 
 /* This strategy is described in the KR 2022 paper. */
-class BestUserInteraction()(using configuration: RepairConfiguration) extends UserInteraction() {
+class BestUserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends UserInteraction() {
 
   private val individuals = configuration.ontologyReasoner.instances(OWLThing)
   private val atomicClassAssertions = individuals.flatMap(individual => configuration.ontologyReasoner.types(individual).filter(_.isAtom).map(atom => individual Type atom))
   private val repairTemplate = mutable.HashSet[Query]()
   private val particularizedRepairRequest = mutable.HashSet.from(configuration.request.axioms)
-  private val tboxAxioms = configuration.axioms.filter({ case SubClassOf(_, _, _) => true; case _ => false })
+  private val tboxAxioms = configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala
   private val templateReasoner = ELReasoner(tboxAxioms, configuration.subClassExpressions, false)
   private val remainingQueries = mutable.HashSet.from[Query](atomicClassAssertions)
 
@@ -573,7 +574,7 @@ class BestUserInteraction()(using configuration: RepairConfiguration) extends Us
 
   override protected def getRepairSeedUnchecked(): RepairSeed = {
     val seedAxioms = atomicClassAssertions.filter(axiom => (configuration.ontologyReasoner entails axiom) && !(templateReasoner entails axiom))
-    RepairSeed(false, seedAxioms: _*)
+    RepairSeed(false, seedAxioms)
   }
 
   override def getButtonTypes(query: Query): collection.Set[Answer] = {

@@ -25,7 +25,7 @@ libraryDependencies += "org.slf4j" % "slf4j-nop" % "2.0.9"
 libraryDependencies += "edu.stanford.protege" % "protege-editor-owl" % "5.6.3" % "provided" excludeAll "net.sourceforge.owlapi"
 //libraryDependencies += "se.samuelsjoberg" % "multiline" % "1.0-SNAPSHOT"
 
-ThisBuild / assemblyMergeStrategy  := {
+ThisBuild / assemblyMergeStrategy := {
   case PathList("module-info.class") => MergeStrategy.discard
   case x if x.endsWith("/module-info.class") => MergeStrategy.discard
   case x =>

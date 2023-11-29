@@ -5,11 +5,11 @@ import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
 
 import org.phenoscape.scowl.*
-import org.semanticweb.owlapi.model.{OWLClassExpression, OWLObjectPropertyAssertionAxiom}
+import org.semanticweb.owlapi.model.{OWLClassExpression, OWLObjectPropertyAssertionAxiom, OWLOntologyManager}
 
 import scala.jdk.StreamConverters.*
 
-trait ErrorTolerantReasoner(using configuration: RepairConfiguration) {
+trait ErrorTolerantReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) {
 
   def isBravelyEntailed(queries: collection.Set[Query]): Boolean = {
     // entailmentProbability(queries) > 0f
@@ -18,7 +18,9 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration) {
         queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
           configuration.request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
       val reasoner: ELReasoner = ELReasoner(queries, subClassExpressions, true)
-      !configuration.request.axioms.exists(reasoner.entails)
+      val result = !configuration.request.axioms.exists(reasoner.entails)
+      reasoner.dispose()
+      result
     }
   }
 
@@ -30,7 +32,7 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration) {
 
 }
 
-class ErrorTolerantIQReasoner(using configuration: RepairConfiguration) extends ErrorTolerantReasoner() {
+class ErrorTolerantIQReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends ErrorTolerantReasoner() {
 
   def entailmentProbability(queries: collection.Set[Query]): Float = {
     if queries.exists({
@@ -64,7 +66,7 @@ class ErrorTolerantIQReasoner(using configuration: RepairConfiguration) extends 
 
 }
 
-class ErrorTolerantIRQReasoner(using configuration: RepairConfiguration) extends ErrorTolerantReasoner() {
+class ErrorTolerantIRQReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends ErrorTolerantReasoner() {
 
   def entailmentProbability(queries: collection.Set[Query]): Float = {
     ???

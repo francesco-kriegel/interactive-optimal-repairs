@@ -38,6 +38,7 @@ private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with Backgr
     })
   }
 
+  /* The code will be executed in the Swing thread. */
   def executeAndThen(code: => Unit): Unit = {
     executeAndThen((_: T) => { code })
   }
