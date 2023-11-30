@@ -1,10 +1,12 @@
 # Interactive Optimal Repairs (Protégé plugin)
 
 To use this plugin, do the following steps:
-1. Download Protégé from [https://protege.stanford.edu](https://protege.stanford.edu)
-2. Build the bundle of this plugin with `sbt osgiBundle`
-3. Copy the jar file from `target` to the subfolder `plugins` of Protégé
-4. Run Protégé and activate the new tab from the menu *Window* -> *Tabs* -> *Interactive Optimal Repair*
+1. Download Protégé from [https://protege.stanford.edu](https://protege.stanford.edu) and install it.
+2. Build the bundle of this plugin with `sbt osgiBundle`.
+3. Copy the jar file from `target` to the subfolder `plugins` of Protégé.
+4. Run Protégé and activate the new tab from the menu *Window* → *Tabs* → *Interactive Optimal Repair*.
+
+Instead of Steps 2 and 3, you can also download the bundle from https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.0/interactive-optimal-repairs-0.1.0.jar into the subfolder `plugins` of Protégé.
 
 ### MacOS Installer Script
 
