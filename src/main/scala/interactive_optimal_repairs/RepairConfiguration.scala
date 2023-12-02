@@ -8,7 +8,14 @@ import org.semanticweb.owlapi.model.{OWLClassExpression, OWLOntology, OWLOntolog
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
-class RepairConfiguration(val ontology: OWLOntology, val request: RepairRequest)(using ontologyManager: OWLOntologyManager) {
+protected class RepairConfiguration(val ontology: OWLOntology,
+                                    val request: RepairRequest,
+                                    val ontologyReasoner: ExtendedClassificationForMultipleABoxesWithSharedTBox)
+                                   (using ontologyManager: OWLOntologyManager) {
+
+  def this(ontology: OWLOntology, request: RepairRequest)(using ontologyManager: OWLOntologyManager) = {
+    this(ontology, request, ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology, Set.empty, true))
+  }
 
   println("Initializing repair configuration with " + ontology.getAxioms(Imports.INCLUDED).size() + " axioms in the ontology and " + request.axioms.size + " queries in the repair request ...")
 
@@ -45,12 +52,19 @@ class RepairConfiguration(val ontology: OWLOntology, val request: RepairRequest)
       conceptInclusionsMap.getOrElseUpdate(premise, { mutable.HashSet[OWLClassExpression]() }).add(conclusion)
   }
   
-  val trivialReasoner: ELReasoner = ELReasoner(Set.empty, subClassExpressions, true)
-  val ontologyReasoner: ELReasoner = ELReasoner(ontology, subClassExpressions, true)
+  val trivialReasoner = ExtendedClassification(Set.empty, subClassExpressions, true)
+//  // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
+//  val ontologyReasoner = ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology, subClassExpressions, true)
+  ontologyReasoner.addClassExpressions(subClassExpressions)
+  ontologyReasoner.precomputeInferences()
+
+  lazy val iqSaturation = { given configuration: RepairConfiguration = this; IQSaturation() }
 
   def dispose(): Unit = {
     trivialReasoner.dispose()
     ontologyReasoner.dispose()
+    conceptInclusionsMap.clear()
+    conceptInclusions.clear()
   }
 
 }

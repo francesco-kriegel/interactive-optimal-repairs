@@ -16,47 +16,28 @@ import scala.jdk.StreamConverters.*
 
 type ELAxiom = OWLSubClassOfAxiom | OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom
 
-object ELReasoner {
-
-  /* Global selection of the reasoner version */
-  private val DefaultImplementation = IndexedELReasoner
-
-  def apply(ontology: OWLOntology,
-            classExpressions: collection.Set[OWLClassExpression],
-            allowNewClassExpressions: Boolean = true)
-           (using ontologyManager: OWLOntologyManager): ELReasoner = {
-    //val ontologySolelyForReasoner = ontologyManager.copyOntology(ontology, OntologyCopy.DEEP)
-    val ontologySolelyForReasoner = ontologyManager.createOntology(ontology.getAxioms)
-//    //TODO: For general use, handle cases where `ontology` is not managed by `ontologyManager`
-//    val ontologySolelyForReasoner = ontologyManager.createOntology()
-//    ontologyManager.applyChange(
-//      AddImport(
-//        ontologySolelyForReasoner,
-//        ontologyManager.getOWLDataFactory.getOWLImportsDeclaration(ontologyManager.getOntologyDocumentIRI(ontology))
-//      )
-//    )
-//    //ontologyManager.loadOntology(ontologyManager.getOntologyDocumentIRI(ontology))
-    DefaultImplementation(ontologySolelyForReasoner, classExpressions, allowNewClassExpressions, () => { ontologyManager.removeOntology(ontologySolelyForReasoner) })
-  }
-
-  def apply(axioms: collection.Set[_ <: OWLAxiom], // ELAxiom
-            classExpressions: collection.Set[OWLClassExpression],
-            allowNewClassExpressions: Boolean)
-           (using ontologyManager: OWLOntologyManager): ELReasoner = {
-    val ontologySolelyForReasoner = ontologyManager.createOntology(axioms.asInstanceOf[collection.Set[OWLAxiom]].asJava)
-    DefaultImplementation(ontologySolelyForReasoner, classExpressions, allowNewClassExpressions, () => { ontologyManager.removeOntology(ontologySolelyForReasoner) })
-  }
-
-}
-
-protected trait ELReasoner(ontology: OWLOntology, // axioms: Iterable[ELAxiom],
-                 classExpressions: collection.Set[OWLClassExpression],
-                 allowNewClassExpressions: Boolean = true,
-                 onDisposal: () => Unit = () => {})
+class ExtendedClassification(ontology: OWLOntology,
+                             classExpressions: collection.Set[OWLClassExpression],
+                             allowNewClassExpressions: Boolean,
+                             ontologyWillNotBeAccessedOtherwise: Boolean = false)
+                            (using ontologyManager: OWLOntologyManager)
   extends PartialOrdering[OWLClassExpression] {
 
+  protected val localOntology = if ontologyWillNotBeAccessedOtherwise then ontology else ontologyManager.createOntology(ontology.getAxioms)
+
+  def this(axioms: collection.Set[_ <: OWLAxiom],
+           classExpressions: collection.Set[OWLClassExpression],
+           allowNewClassExpressions: Boolean)
+          (using ontologyManager: OWLOntologyManager) = {
+    this(
+      ontologyManager.createOntology(axioms.asInstanceOf[collection.Set[OWLAxiom]].asJava),
+      classExpressions,
+      allowNewClassExpressions,
+      true)
+  }
+
   protected def addAxiom(axiom: ELAxiom): Unit = {
-    ontology.addAxiom(axiom)
+    localOntology.addAxiom(axiom)
   }
 
   def addAxiomAndFlush(axiom: ELAxiom): Unit = {
@@ -65,7 +46,7 @@ protected trait ELReasoner(ontology: OWLOntology, // axioms: Iterable[ELAxiom],
   }
 
   protected def removeAxiom(axiom: ELAxiom): Unit = {
-    ontology.removeAxiom(axiom)
+    localOntology.removeAxiom(axiom)
   }
 
   def removeAxiomAndFlush(axiom: ELAxiom): Unit = {
@@ -73,61 +54,20 @@ protected trait ELReasoner(ontology: OWLOntology, // axioms: Iterable[ELAxiom],
     elkReasoner.flush()
   }
 
-  print(" 1 ")
-  protected val elkReasoner = ElkReasonerFactory().createReasoner(ontology)
-  print(" 2 ")
+  protected val elkReasoner = ElkReasonerFactory().createReasoner(localOntology)
   // elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
-  print(" 3 ")
 
   def dispose(): Unit = {
     elkReasoner.dispose()
-    onDisposal()
+    ontologyManager.removeOntology(localOntology)
+    _representativeOf.clear()
+    representativeFor.clear()
+    nominals.clear()
+    successors.clear()
   }
 
-  def addClassExpression(classExpression: OWLClassExpression): Unit
-
-  def entails(axiom: ELAxiom): Boolean
-  def isInstanceOf(individual: OWLIndividual, classExpression: OWLClassExpression): Boolean
-  def isSubsumedBy(subClassExpression: OWLClassExpression, superClassExpression: OWLClassExpression): Boolean
-
-  def types(individual: OWLIndividual): Iterable[OWLClassExpression]
-  def instances(classExpression: OWLClassExpression): Iterable[OWLNamedIndividual]
-  def subsumers(classExpression: OWLClassExpression): Iterable[OWLClassExpression]
-  def subsumees(classExpression: OWLClassExpression): Iterable[OWLClassExpression]
-
-//  def getTypes(individual: OWLIndividual): collection.Set[OWLClassExpression] = types(individual).toSet
-//  def getInstances(classExpression: OWLClassExpression): collection.Set[OWLNamedIndividual] = instances(classExpression).toSet
-//  def getSubsumers(classExpression: OWLClassExpression): collection.Set[OWLClassExpression] = subsumers(classExpression).toSet
-//  def getSubsumees(classExpression: OWLClassExpression): collection.Set[OWLClassExpression] = subsumees(classExpression).toSet
-
-  override def tryCompare(x: OWLClassExpression, y: OWLClassExpression): Option[Int] = {
-    if (lt(x, y)) Some(-1)
-    else if (equiv(x, y)) Some(0)
-    else if (gt(x, y)) Some(1)
-    else None
-  }
-
-  override def lteq(x: OWLClassExpression, y: OWLClassExpression): Boolean = equiv(x, y) || lt(x, y)
-
-  override def gteq(x: OWLClassExpression, y: OWLClassExpression): Boolean = equiv(x, y) || gt(x, y)
-
-  override def gt(x: OWLClassExpression, y: OWLClassExpression): Boolean = lt(y, x)
-
-}
-
-/* This class encapsulates an instance of the ELK reasoner and provides methods with which the reasoning results can be accessed
-* in a controlled manner and especially for OWL class expressions that are no named classes.  It currently supports the description
-* logic 𝓔𝓛.  While it is expected that the supplied `axioms` are fully compliant with 𝓔𝓛, the access methods also support as further
-* class expressions nominals {a} and successors ∃r.{b}, but the subsumers of the latter are determined only partially in a way that
-* suffices for the computation of a repair. */
-protected class IndexedELReasoner(ontology: OWLOntology, // axioms: Iterable[ELAxiom],
-                                  classExpressions: collection.Set[OWLClassExpression],
-                                  allowNewClassExpressions: Boolean = true,
-                                  onDisposal: () => Unit = () => {})
-  extends ELReasoner(ontology, classExpressions, allowNewClassExpressions, onDisposal) {
-
-  private val _representativeOf = mutable.HashMap[OWLClassExpression, OWLClass]() // java.util.HashMap[OWLClassExpression, OWLClass]().asScala
-  private val representativeFor = mutable.HashMap[OWLClass, OWLClassExpression]() // java.util.HashMap[OWLClass, OWLClassExpression]().asScala
+  private val _representativeOf = java.util.concurrent.ConcurrentHashMap[OWLClassExpression, OWLClass]().asScala // mutable.HashMap[OWLClassExpression, OWLClass]()
+  private val representativeFor = java.util.concurrent.ConcurrentHashMap[OWLClass, OWLClassExpression]().asScala // mutable.HashMap[OWLClass, OWLClassExpression]()
 
   private def representativeOf(classExpression: OWLClassExpression): OWLClass = {
     classExpression match
@@ -135,22 +75,20 @@ protected class IndexedELReasoner(ontology: OWLOntology, // axioms: Iterable[ELA
       case _ => _representativeOf(classExpression)
   }
 
-  protected val nominals = mutable.HashSet[OWLObjectOneOf]() // java.util.HashSet[OWLObjectOneOf]().asScala
-  protected val successors = mutable.HashSet[OWLObjectSomeValuesFrom]() // java.util.HashSet[OWLObjectSomeValuesFrom]().asScala
+  protected val nominals = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLObjectOneOf]().asScala // mutable.HashSet[OWLObjectOneOf]()
+  protected val successors = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLObjectSomeValuesFrom]().asScala // mutable.HashSet[OWLObjectSomeValuesFrom]()
 
-  override def addClassExpression(classExpression: OWLClassExpression): Unit = addRepresentative(classExpression)
-
-  override def dispose(): Unit = {
-    super.dispose()
-    _representativeOf.clear()
-    representativeFor.clear()
-    nominals.clear()
-    successors.clear()
-  }
-
-  private def addRepresentative(classExpression: OWLClassExpression): Unit = {
+  def addClassExpression(classExpression: OWLClassExpression): Unit = {
     if (allowNewClassExpressions)
       addRepresentativeUnchecked(classExpression)
+      elkReasoner.flush()
+    else
+      throw new RuntimeException("No new class expressions in the reasoner are allowed.")
+  }
+
+  def addClassExpressions(classExpressions: collection.Set[OWLClassExpression]): Unit = {
+    if (allowNewClassExpressions)
+      classExpressions.foreach(addRepresentativeUnchecked)
       elkReasoner.flush()
     else
       throw new RuntimeException("No new class expressions in the reasoner are allowed.")
@@ -167,19 +105,19 @@ protected class IndexedELReasoner(ontology: OWLOntology, // axioms: Iterable[ELA
       //        val representative =
       //          classExpression match
       //            case c @ Class(_) => c
-      //            case _ => Class("internal_representative_class_for#" + classExpression)
+      //            case _ => Class("internal_representative_class_of#" + classExpression)
       //        representativeOf(classExpression) = representative
       //        representativeFor(representative) = classExpression
       //        if (!(classExpression equals representative))
       //          ontology.addAxiom(EquivalentClasses(representative, classExpression))
       case c@Class(_) =>
         // representativeOf(c) = c
-        representativeFor(c) = c
+        // representativeFor(c) = c
       case _ =>
-        val representative = Class("internal_representative_class_for#" + classExpression)
+        val representative = Class("internal_representative_class_of#" + classExpression)
         _representativeOf(classExpression) = representative
         representativeFor(representative) = classExpression
-        ontology.addAxiom(representative EquivalentTo classExpression)
+        localOntology.addAxiom(representative EquivalentTo classExpression)
   }
 
   private def hasRepresentative(classExpression: OWLClassExpression): Boolean = {
@@ -197,59 +135,60 @@ protected class IndexedELReasoner(ontology: OWLOntology, // axioms: Iterable[ELA
   private def ensureHasRepresentative(classExpression: OWLClassExpression): Unit = {
     // representativeOf.synchronized {
     if (!hasRepresentative(classExpression))
-      addRepresentative(classExpression)
+      addClassExpression(classExpression)
     // }
   }
 
   // representativeOf(OWLThing) = OWLThing
-  representativeFor(OWLThing) = OWLThing
-  print(" 4 ")
+  // representativeFor(OWLThing) = OWLThing
   classExpressions.foreach(addRepresentativeUnchecked)
-  print(" 5 ")
   elkReasoner.flush()
-  print(" 6 ")
   elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
-  print(" 7 ")
 
-  override def entails(axiom: ELAxiom): Boolean = {
-    axiom match {
-      case subClassOfAxiom: OWLSubClassOfAxiom => isSubsumedBy(subClassOfAxiom.getSubClass, subClassOfAxiom.getSuperClass)
-      case classAssertionAxiom: OWLClassAssertionAxiom => isInstanceOf(classAssertionAxiom.getIndividual, classAssertionAxiom.getClassExpression)
-      case objectPropertyAssertionAxiom: OWLObjectPropertyAssertionAxiom => elkReasoner.isEntailed(objectPropertyAssertionAxiom)
-    }
+  def precomputeInferences(): Unit = {
+    elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
   }
 
-  override def isInstanceOf(individual: OWLIndividual, classExpression: OWLClassExpression): Boolean = {
+  def entails(axiom: ELAxiom): Boolean = {
+//    axiom match {
+//      case SubClassOf(_, subClass, superClass) => isSubsumedBy(subClass, superClass)
+//      case ClassAssertion(_, classExpression, individual) => isInstanceOf(individual, classExpression)
+//      case objectPropertyAssertionAxiom: OWLObjectPropertyAssertionAxiom => elkReasoner.isEntailed(objectPropertyAssertionAxiom)
+//    }
+    elkReasoner.isEntailed(axiom)
+  }
+
+  def isInstanceOf(individual: OWLIndividual, classExpression: OWLClassExpression): Boolean = {
     ensureHasRepresentative(classExpression)
     types(individual).contains(classExpression)
   }
 
-  override def isSubsumedBy(subClassExpression: OWLClassExpression, superClassExpression: OWLClassExpression): Boolean = {
+  def isSubsumedBy(subClassExpression: OWLClassExpression, superClassExpression: OWLClassExpression): Boolean = {
     ensureHasRepresentative(superClassExpression)
     subsumers(subClassExpression).contains(superClassExpression)
   }
 
-  override def types(individual: OWLIndividual): LazyList[OWLClassExpression] = {
+  def types(individual: OWLIndividual): LazyList[OWLClassExpression] = {
     // TODO: treat anonymous individuals
     (if nominals contains Nominal(individual.asOWLNamedIndividual()) then LazyList(Nominal(individual.asOWLNamedIndividual())) else LazyList.empty) concat
       (successors.filter { case ObjectSomeValuesFrom(property@ObjectProperty(_), _@Nominal(target)) => elkReasoner.isEntailed(individual.asOWLNamedIndividual() Fact(property, target)); case _ => false }) concat
-      elkReasoner.types(individual.asOWLNamedIndividual()).toScala(LazyList).map(representativeFor)
+      elkReasoner.types(individual.asOWLNamedIndividual()).toScala(LazyList).map(representativeFor.orElse(c => c))
   }
 
-  override def instances(classExpression: OWLClassExpression): LazyList[OWLNamedIndividual] = {
+  def instances(classExpression: OWLClassExpression): LazyList[OWLIndividual] = {
     ensureHasRepresentative(classExpression)
     classExpression match
       case Nominal(individual) =>
         LazyList(individual)
       case ObjectSomeValuesFrom(property@ObjectProperty(_), _@Nominal(target)) =>
-        ontology.getABoxAxioms(Imports.INCLUDED).stream().toScala(LazyList).collect {
-          case ObjectPropertyAssertion(_, qroperty, subject@NamedIndividual(_), uarget) if (property equals qroperty) && (target equals uarget) => subject
+        localOntology.getABoxAxioms(Imports.INCLUDED).stream().toScala(LazyList).collect {
+          case ObjectPropertyAssertion(_, qroperty, subject, uarget) if (property equals qroperty) && (target equals uarget) => subject
         }
       case _ =>
         elkReasoner.instances(representativeOf(classExpression)).toScala(LazyList)
   }
 
-  override def subsumers(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
+  def subsumers(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
     ensureHasRepresentative(classExpression)
     classExpression match
       case Nominal(individual) =>
@@ -260,82 +199,209 @@ protected class IndexedELReasoner(ontology: OWLOntology, // axioms: Iterable[ELA
         java.util.stream.Stream.concat(
           elkReasoner.equivalentClasses(representativeOf(classExpression)),
           elkReasoner.superClasses(representativeOf(classExpression))
-        ).toScala(LazyList).map(representativeFor)
+        ).toScala(LazyList).map(representativeFor.orElse(c => c))
   }
 
-  override def subsumees(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
+  def subsumees(classExpression: OWLClassExpression): LazyList[OWLClassExpression] = {
     ensureHasRepresentative(classExpression)
     classExpression match
       case nominal@Nominal(_) =>
         LazyList(nominal)
       case ObjectSomeValuesFrom(property@ObjectProperty(_), _@Nominal(target)) =>
-        ontology.getABoxAxioms(Imports.INCLUDED).stream().toScala(LazyList).collect {
+        localOntology.getABoxAxioms(Imports.INCLUDED).stream().toScala(LazyList).collect {
           case ObjectPropertyAssertion(_, qroperty, subject@NamedIndividual(_), uarget) if (property equals qroperty) && (target equals uarget) => Nominal(subject)
         }
       case _ =>
         java.util.stream.Stream.concat(
           elkReasoner.equivalentClasses(representativeOf(classExpression)),
           elkReasoner.subClasses(representativeOf(classExpression))
-        ).toScala(LazyList).filterNot(_ equals OWLNothing).map(representativeFor)
+        ).toScala(LazyList).filterNot(_ equals OWLNothing).map(representativeFor.orElse(c => c))
+  }
+
+  override def tryCompare(x: OWLClassExpression, y: OWLClassExpression): Option[Int] = {
+    if (lt(x, y)) Some(-1)
+    else if (equiv(x, y)) Some(0)
+    else if (gt(x, y)) Some(1)
+    else None
   }
 
   override def lt(x: OWLClassExpression, y: OWLClassExpression): Boolean = {
     ensureHasRepresentative(x)
     ensureHasRepresentative(y)
-    elkReasoner.superClasses(representativeOf(x)).toScala(LazyList).map(representativeFor).contains(y)
+    elkReasoner.superClasses(representativeOf(x)).toScala(LazyList).map(representativeFor.orElse(c => c)).contains(y)
   }
 
   override def equiv(x: OWLClassExpression, y: OWLClassExpression): Boolean = {
     ensureHasRepresentative(x)
     ensureHasRepresentative(y)
-    elkReasoner.equivalentClasses(representativeOf(x)).toScala(LazyList).map(representativeFor).contains(y)
+    elkReasoner.equivalentClasses(representativeOf(x)).toScala(LazyList).map(representativeFor.orElse(c => c)).contains(y)
   }
+
+  override def lteq(x: OWLClassExpression, y: OWLClassExpression): Boolean = equiv(x, y) || lt(x, y)
+
+  override def gteq(x: OWLClassExpression, y: OWLClassExpression): Boolean = equiv(x, y) || gt(x, y)
+
+  override def gt(x: OWLClassExpression, y: OWLClassExpression): Boolean = lt(y, x)
 
 }
 
-protected class LazyELReasoner(ontology: OWLOntology, // axioms: Iterable[ELAxiom],
-                               initiallySuppliedClassExpressions: collection.Set[OWLClassExpression],
-                               allowNewClassExpressions: Boolean = true,
-                               onDisposal: () => Unit = () => {})
-  extends ELReasoner(ontology, initiallySuppliedClassExpressions, allowNewClassExpressions, onDisposal) {
+private class ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology: OWLOntology,
+                                                                    classExpressions: collection.Set[OWLClassExpression],
+                                                                    allowNewClassExpressions: Boolean,
+                                                                    ontologyWillNotBeAccessedOtherwise: Boolean = false)
+                                                                   (using ontologyManager: OWLOntologyManager)
+  extends ExtendedClassification(ontology, classExpressions, allowNewClassExpressions, ontologyWillNotBeAccessedOtherwise) {
 
-  private val classExpressions = mutable.HashSet.from(initiallySuppliedClassExpressions)
+  def this(axioms: collection.Set[_ <: OWLAxiom],
+           classExpressions: collection.Set[OWLClassExpression],
+           allowNewClassExpressions: Boolean)
+          (using ontologyManager: OWLOntologyManager) = {
+    this(
+      ontologyManager.createOntology(axioms.asInstanceOf[collection.Set[OWLAxiom]].asJava),
+      classExpressions,
+      allowNewClassExpressions,
+      true)
+  }
 
-  println("Initializing ELReasonerV2 with " + classExpressions.size + " class expressions.")
+  private val iRepresentativeOfMaps = mutable.ArrayBuffer[mutable.Map[OWLIndividual, OWLIndividual]]()
+  private val iRepresentativeForMaps = mutable.ArrayBuffer[mutable.Map[OWLIndividual, OWLIndividual]]()
 
-  elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
+//  private val individualsInInitialABox = mutable.HashSet.from[OWLIndividual](ontology.getIndividualsInSignature(Imports.INCLUDED).asScala ++ ontology.getAnonymousIndividuals.asScala)
+  private val individualsInInitialABox = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLIndividual]().asScala
+  individualsInInitialABox ++= ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
+  individualsInInitialABox ++= ontology.getAnonymousIndividuals.asScala
 
-  override def addClassExpression(classExpression: OWLClassExpression): Unit =
-    if allowNewClassExpressions then
-      classExpressions += classExpression
+  private var currentABoxIndex = -1
+  private val unregisteredABoxIndices = java.util.concurrent.ConcurrentHashMap.newKeySet[Integer]().asScala // mutable.HashSet[Integer]()
+
+  private def checkABoxIndex(aboxIndex: Integer): Unit = {
+    if !(0 <= aboxIndex && aboxIndex <= currentABoxIndex) || (unregisteredABoxIndices contains aboxIndex) then
+      throw IllegalArgumentException()
+  }
+
+  def registerABox(abox: OWLOntology, disposeOfABox: Boolean = false): Integer = {
+    currentABoxIndex += 1
+    val iRepresentativeOf = java.util.concurrent.ConcurrentHashMap[OWLIndividual, OWLIndividual]().asScala // mutable.HashMap[OWLIndividual, OWLIndividual]()
+    val iRepresentativeFor = java.util.concurrent.ConcurrentHashMap[OWLIndividual, OWLIndividual]().asScala // mutable.HashMap[OWLIndividual, OWLIndividual]()
+    iRepresentativeOfMaps += iRepresentativeOf
+    iRepresentativeForMaps += iRepresentativeFor
+
+    val individuals = abox.getIndividualsInSignature(Imports.INCLUDED).asScala ++ abox.getAnonymousIndividuals.asScala
+    individuals.foreach { individual =>
+      val representative = Individual("abox_" + currentABoxIndex + "_internal_representative_individual_of#" + individual)
+      iRepresentativeOf(individual) = representative
+      iRepresentativeFor(representative) = individual
+    }
+
+    val axioms = abox.getABoxAxioms(Imports.INCLUDED).asScala
+    axioms.foreach {
+      case ClassAssertion(_, classExpression, individual) =>
+        super.addAxiom(iRepresentativeOf(individual) Type classExpression)
+      case ObjectPropertyAssertion(_, property, subject, target) =>
+        super.addAxiom(iRepresentativeOf(subject) Fact (property, iRepresentativeOf(target)))
+    }
+    elkReasoner.flush()
+    elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
+
+    if disposeOfABox then
+      ontologyManager.removeOntology(abox)
+
+    currentABoxIndex
+  }
+
+  def registerABox(axioms: collection.Set[OWLAxiom]): Integer = {
+    registerABox(ontologyManager.createOntology(axioms.asJava), true)
+  }
+
+  def unregisterABox(aboxIndex: Integer): Unit = {
+    checkABoxIndex(aboxIndex)
+    iRepresentativeForMaps(aboxIndex).keySet.foreach { representative =>
+      ontologyManager.removeAxioms(localOntology, localOntology.getAxioms(representative, Imports.EXCLUDED))
+    }
+    elkReasoner.flush()
+    iRepresentativeOfMaps(aboxIndex).clear()
+    iRepresentativeForMaps(aboxIndex).clear()
+    unregisteredABoxIndices += aboxIndex
+  }
+
+  private def getRepresentativeOf(aboxIndex: Integer, individual: OWLIndividual): OWLIndividual = {
+    //checkABoxIndex(aboxIndex)
+    if !(iRepresentativeOfMaps(aboxIndex) contains individual) then
+      val representative = Individual("abox_" + currentABoxIndex + "_internal_representative_individual_of#" + individual)
+      iRepresentativeOfMaps(aboxIndex)(individual) = representative
+      iRepresentativeForMaps(aboxIndex)(representative) = individual
+      representative
     else
-      throw RuntimeException("No new class expressions in the reasoner are allowed.")
+      iRepresentativeOfMaps(aboxIndex)(individual)
+  }
 
-  override def entails(axiom: ELAxiom): Boolean =
-    elkReasoner.isEntailed(axiom)
+  override protected def addAxiom(axiom: ELAxiom): Unit = {
+    axiom match
+      case ClassAssertion(_, _, individual) =>
+        individualsInInitialABox += individual
+      case ObjectPropertyAssertion(_, _, subject, target) =>
+        individualsInInitialABox += subject
+        individualsInInitialABox += target
+      case _ =>
+        // Do nothing.
+    super.addAxiom(axiom)
+  }
 
-  override def isInstanceOf(individual: OWLIndividual, classExpression: OWLClassExpression): Boolean =
-    elkReasoner.isEntailed(individual Type classExpression)
+  override def addAxiomAndFlush(axiom: ELAxiom): Unit = {
+    addAxiom(axiom)
+    elkReasoner.flush()
+  }
 
-  override def isSubsumedBy(subClassExpression: OWLClassExpression, superClassExpression: OWLClassExpression): Boolean =
-    elkReasoner.isEntailed(subClassExpression SubClassOf superClassExpression)
+  private def translateAxiom(aboxIndex: Integer, axiom: ELAxiom): ELAxiom = {
+    axiom match
+      case ClassAssertion(_, classExpression, individual) =>
+        getRepresentativeOf(aboxIndex, individual) Type classExpression
+      case ObjectPropertyAssertion(_, property, subject, target) =>
+        getRepresentativeOf(aboxIndex, subject) Fact(property, getRepresentativeOf(aboxIndex, target))
+      case _ =>
+        axiom
+  }
 
-  override def types(individual: OWLIndividual): collection.Set[OWLClassExpression] =
-    classExpressions.filter(isInstanceOf(individual, _))
+  def addAxiomAndFlush(aboxIndex: Integer, axiom: ELAxiom): Unit = {
+    checkABoxIndex(aboxIndex)
+    super.addAxiomAndFlush(translateAxiom(aboxIndex, axiom))
+  }
 
-  override def instances(classExpression: OWLClassExpression): LazyList[OWLNamedIndividual] =
-    elkReasoner.instances(classExpression).toScala(LazyList)
+  def removeAxiomAndFlush(aboxIndex: Integer, axiom: ELAxiom): Unit = {
+    checkABoxIndex(aboxIndex)
+    removeAxiomAndFlush(translateAxiom(aboxIndex, axiom))
+  }
 
-  override def subsumees(classExpression: OWLClassExpression): collection.Set[OWLClassExpression] =
-    classExpressions.filter(isSubsumedBy(_, classExpression))
+  def entails(aboxIndex: Integer, axiom: ELAxiom): Boolean = {
+    checkABoxIndex(aboxIndex)
+    entails(translateAxiom(aboxIndex, axiom))
+  }
 
-  override def subsumers(classExpression: OWLClassExpression): collection.Set[OWLClassExpression] =
-    classExpressions.filter(isSubsumedBy(classExpression, _))
+  def isInstanceOf(aboxIndex: Integer, individual: OWLIndividual, classExpression: OWLClassExpression): Boolean = {
+    checkABoxIndex(aboxIndex)
+    isInstanceOf(getRepresentativeOf(aboxIndex, individual), classExpression)
+  }
 
-  override def lt(x: OWLClassExpression, y: OWLClassExpression): Boolean =
-    isSubsumedBy(x, y)
+  def types(aboxIndex: Integer, individual: OWLIndividual): LazyList[OWLClassExpression] = {
+    checkABoxIndex(aboxIndex)
+    types(getRepresentativeOf(aboxIndex, individual))
+  }
 
-  override def equiv(x: OWLClassExpression, y: OWLClassExpression): Boolean =
-    elkReasoner.isEntailed(x EquivalentTo y)
+  override def instances(classExpression: OWLClassExpression): LazyList[OWLIndividual] = {
+    super.instances(classExpression) filter individualsInInitialABox
+  }
+
+  def instances(aboxIndex: Integer, classExpression: OWLClassExpression): LazyList[OWLIndividual] = {
+    checkABoxIndex(aboxIndex)
+    super.instances(classExpression) collect iRepresentativeForMaps(aboxIndex)
+  }
+
+  override def dispose(): Unit = {
+    super.dispose()
+    iRepresentativeOfMaps.clear()
+    iRepresentativeForMaps.clear()
+    individualsInInitialABox.clear()
+    unregisteredABoxIndices.clear()
+  }
 
 }

@@ -33,7 +33,7 @@ object Util {
 
   class OWLSubClassOfAxiomReasonerRequest(subClassOfAxiom: OWLSubClassOfAxiom) {
 
-    def wrt(reasoner: ELReasoner): Boolean =
+    def wrt(reasoner: ExtendedClassification): Boolean =
       reasoner entails subClassOfAxiom
 
   }
@@ -81,7 +81,7 @@ object Util {
 
     lazy val reduced: OWLClassExpression = {
       given ontologyManager: OWLOntologyManager = OWLManager.createOWLOntologyManager() // TODO
-      val reasoner = ELReasoner(Set.empty, classExpression.getNestedClassExpressions.asScala, true)
+      val reasoner = ExtendedClassification(Set.empty, classExpression.getNestedClassExpressions.asScala, true)
       val reduction =
         if (classExpression subsumes OWLThing wrt reasoner)
           OWLThing
@@ -141,7 +141,7 @@ object Util {
 
   implicit class ImplicitOWLSubClassOfAxiom(subClassOfAxiom: OWLSubClassOfAxiom) {
 
-    def isEntailedBy(reasoner: ELReasoner): Boolean =
+    def isEntailedBy(reasoner: ExtendedClassification): Boolean =
       reasoner entails subClassOfAxiom
 
     lazy val toDLString: String =
@@ -154,7 +154,7 @@ object Util {
 
   implicit class ImplicitOWLClassAssertionAxiom(classAssertion: OWLClassAssertionAxiom) {
 
-    def isEntailedBy(reasoner: ELReasoner): Boolean =
+    def isEntailedBy(reasoner: ExtendedClassification): Boolean =
       reasoner entails classAssertion
 
     lazy val toDLString: String =
@@ -183,7 +183,7 @@ object Util {
 
   implicit class ImplicitOWLObjectPropertyAssertionAxiom(propertyAssertion: OWLObjectPropertyAssertionAxiom) {
 
-    def isEntailedBy(reasoner: ELReasoner): Boolean =
+    def isEntailedBy(reasoner: ExtendedClassification): Boolean =
       reasoner entails propertyAssertion
 
     lazy val toDLString: String =
@@ -228,7 +228,7 @@ object Util {
 
   class CoverageReasonerRequest(classExpressions: Iterable[OWLClassExpression], others: Iterable[OWLClassExpression], strict: Boolean) {
 
-    def wrt(reasoner: ELReasoner): Boolean =
+    def wrt(reasoner: ExtendedClassification): Boolean =
       classExpressions.forall(c => others.exists(d => c isSubsumedBy d wrt reasoner))
         && (strict implies !others.forall(c => classExpressions.exists(d => c isSubsumedBy d wrt reasoner)))
 

@@ -32,7 +32,8 @@ object Repair {
 
 trait Repair(val seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration) {
 
-  private lazy val saturation = if saturated then IQSaturation() else ???
+//  private lazy val saturation = if saturated then IQSaturation() else ???
+  private lazy val saturation = if saturated then configuration.iqSaturation else ???
 
   def entails(query: Query): Boolean = {
     if saturated then
@@ -56,7 +57,8 @@ trait Repair(val seed: RepairSeed, saturated: Boolean = true)(using configuratio
 class IQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends Repair(seed, saturated) {
 
   override def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology = {
-    val saturation = if saturated then IQSaturation() else NoSaturation()
+//    val saturation = if saturated then IQSaturation() else NoSaturation()
+    val saturation = if saturated then configuration.iqSaturation else NoSaturation()
     val repair = ontologyManager.createOntology()
     ontologyManager.addAxioms(repair, configuration.ontology.getTBoxAxioms(Imports.INCLUDED))
     val factory = CopiedOWLIndividual.FactoryIQ(compatibilityMode)
@@ -67,7 +69,7 @@ class IQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration:
           ontologyManager.addAxiom(repair, subject Fact (property, target))
       case _ => // Do nothing.
     }
-    configuration.ontologyReasoner.instances(OWLThing)//.distinct
+    configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
       .map(individual => factory.getCopyOrElseCreateCopyWithNamedIndividual(individual, seed.getRepairType(individual)))
       .foreach(queue.enqueue)
     while queue.nonEmpty do

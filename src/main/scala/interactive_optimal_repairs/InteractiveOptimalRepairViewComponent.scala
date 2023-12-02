@@ -10,11 +10,9 @@ import org.protege.editor.core.ui.list.MListButton
 import org.protege.editor.owl.OWLEditorKit
 import org.protege.editor.owl.model.classexpression.OWLExpressionParserException
 import org.protege.editor.owl.ui.view.AbstractOWLViewComponent
-import org.semanticweb.elk.owlapi.ElkReasonerFactory
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.Imports
-import org.semanticweb.owlapi.reasoner.InferenceType
 
 import java.awt.*
 import java.awt.event.{WindowEvent, WindowListener}
@@ -114,7 +112,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
     })
     val nextButton = JButton("Next")
     nextButton.setEnabled(false)
-    asynchronouslyInNewWorker {
+    asynchronouslyInNewWorker("Checking whether the active ontology is supported...") {
       ELExpressivityChecker.check(activeOntology)
     } executeAndThen {
       isSupported => {
@@ -125,26 +123,32 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
 
         if isSupported then {
 
-          asynchronouslyInNewWorker {
-            val terminology = ontologyManager.createOntology(activeOntology.getTBoxAxioms(Imports.INCLUDED))
-            val terminologyReasoner = ElkReasonerFactory().createReasoner(terminology)
-            whenDialogClosed {
-              terminologyReasoner.dispose()
-              ontologyManager.removeOntology(terminology)
-            }
-            terminologyReasoner.flush()
-            terminologyReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
-            (terminology, terminologyReasoner)
-          } inParallelWith asynchronouslyInNewWorker {
-            val ontologyReasoner = ElkReasonerFactory().createReasoner(activeOntology)
-            whenDialogClosed {
-              ontologyReasoner.dispose()
-            }
-            ontologyReasoner.flush()
-            ontologyReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
-            ontologyReasoner
+//          asynchronouslyInNewWorker("Initializing the terminology reasoner...") {
+//            val terminology = ontologyManager.createOntology(activeOntology.getTBoxAxioms(Imports.INCLUDED))
+//            val terminologyReasoner = ElkReasonerFactory().createReasoner(terminology)
+//            whenDialogClosed {
+//              terminologyReasoner.dispose()
+//              ontologyManager.removeOntology(terminology)
+//            }
+//            terminologyReasoner.flush()
+//            terminologyReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
+//            (terminology, terminologyReasoner)
+//          } inParallelWith asynchronouslyInNewWorker("Initializing the ontology reasoner...") {
+//            val ontologyReasoner = ElkReasonerFactory().createReasoner(activeOntology)
+//            whenDialogClosed {
+//              ontologyReasoner.dispose()
+//            }
+//            ontologyReasoner.flush()
+//            ontologyReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
+//            ontologyReasoner
+//          } executeAndThen {
+//            case ((terminology, terminologyReasoner), ontologyReasoner) => {
+          asynchronouslyInNewWorker("Initializing the reasoner...") {
+            val reasoner = ExtendedClassificationForMultipleABoxesWithSharedTBox(activeOntology, Set.empty, true)
+            val emptyABoxIndex = reasoner.registerABox(Set.empty)
+            (reasoner, emptyABoxIndex)
           } executeAndThen {
-            case ((terminology, terminologyReasoner), ontologyReasoner) => {
+            (reasoner, emptyABoxIndex) => {
               nextButton.enableWithSingleActionListener(_ => {
                 /* State 0: Repair Request */
                 nextButton.setEnabled(false)
@@ -155,10 +159,12 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                 val repairRequestAxiomList: OrderedOWLAxiomList[Query] =
                   OrderedOWLAxiomList[Query]("Repair Request", "Unwanted Consequence",
                     () => OWLExpressionParserException("Currently only 𝓔𝓛 concept assertions (a Type: C) and role assertions (a Fact: r b) are supported.", 0, 0, false, false, false, false, false, false, Collections.emptySet),
-                    ax => {
-                      if !ELExpressivityChecker.checkAxiom(ax) then Some(OWLException("Currently only 𝓔𝓛 concept assertions (a Type: C) and role assertions (a Fact: r b) are supported."))
-                      else if terminologyReasoner.isEntailed(ax) then Some(OWLException("Tautologies cannot be removed."))
-                      else if !ontologyReasoner.isEntailed(ax) then Some(OWLException("The axiom is not entailed by the active ontology and thus need not be repaired for."))
+                    axiom => {
+                      if !ELExpressivityChecker.checkAxiom(axiom) then Some(OWLException("Currently only 𝓔𝓛 concept assertions (a Type: C) and role assertions (a Fact: r b) are supported."))
+//                      else if terminologyReasoner.isEntailed(axiom) then Some(OWLException("Tautologies cannot be removed."))
+//                      else if !ontologyReasoner.isEntailed(axiom) then Some(OWLException("The axiom is not entailed by the active ontology and thus need not be repaired for."))
+                      else if reasoner.entails(emptyABoxIndex, axiom) then Some(OWLException("Tautologies cannot be removed."))
+                      else if !reasoner.entails(axiom) then Some(OWLException("The axiom is not entailed by the active ontology and thus need not be repaired for."))
                       else None
                     })
                 repairRequestAxiomList.addListDataListener(_ => { nextButton.setEnabled(!repairRequestAxiomList.isEmpty()) })
@@ -169,9 +175,10 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                   /* State 1: Interaction Strategy */
                   nextButton.setEnabled(false)
                   panel.removeAll()
-                  terminologyReasoner.dispose()
-                  ontologyManager.removeOntology(terminology)
-                  ontologyReasoner.dispose()
+//                  terminologyReasoner.dispose()
+//                  ontologyManager.removeOntology(terminology)
+//                  ontologyReasoner.dispose()
+                  reasoner.unregisterABox(emptyABoxIndex)
                   val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(htmlParagraph("<b>" + s.name + "</b> (" + s.description + ")")), s)).toMap
                   val strategyRadioButtonGroup = ButtonGroup()
                   strategyRadioButtons.keys.foreach(strategyRadioButtonGroup.add)
@@ -192,8 +199,8 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                     val repairRequest = RepairRequest(unwantedConsequences: _*)
                     val strategy = strategyRadioButtons.keys.find(_.isSelected).map(strategyRadioButtons).get
 
-                    asynchronouslyInNewWorker {
-                      RepairConfiguration(activeOntology, repairRequest)
+                    asynchronouslyInNewWorker("Generating the repair configuration and updating the reasoner...") {
+                      RepairConfiguration(activeOntology, repairRequest, reasoner)
                     } executeAndThen { _repairConfiguration =>
 
                       given repairConfiguration: RepairConfiguration = _repairConfiguration
@@ -218,7 +225,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           14,
                           _ => {
                             lock(list)
-                            asynchronouslyInNewWorker("Processing user answer ACCEPT to query " + query) {
+                            asynchronouslyInNewWorker("Processing user answer ACCEPT to query " + query + "...") {
                               userInteraction.receiveAnswer(query, ACCEPT)
                             } executeAndThen { _ => unlock(list) }
                           })
@@ -231,7 +238,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           14,
                           _ => {
                             lock(list)
-                            asynchronouslyInNewWorker("Processing user answer IGNORE to query " + query) {
+                            asynchronouslyInNewWorker("Processing user answer IGNORE to query " + query + "...") {
                               userInteraction.receiveAnswer(query, IGNORE)
                             } executeAndThen { _ => unlock(list) }
                           })
@@ -244,7 +251,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           15,
                           _ => {
                             lock(list)
-                            asynchronouslyInNewWorker("Processing user answer DECLINE to query " + query) {
+                            asynchronouslyInNewWorker("Processing user answer DECLINE to query " + query + "...") {
                               userInteraction.receiveAnswer(query, DECLINE)
                             } executeAndThen { _ => unlock(list) }
                           })
@@ -257,7 +264,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           14,
                           _ => {
                             lock(list)
-                            asynchronouslyInNewWorker("Processing user answer INHERITED_ACCEPT to query " + query) {
+                            asynchronouslyInNewWorker("Processing user answer INHERITED_ACCEPT to query " + query + "...") {
                               userInteraction.receiveAnswer(query, INHERITED_ACCEPT)
                             } executeAndThen { _ => unlock(list) }
                           })
@@ -270,7 +277,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           15,
                           _ => {
                             lock(list)
-                            asynchronouslyInNewWorker("Processing user answer INHERITED_DECLINE to query " + query) {
+                            asynchronouslyInNewWorker("Processing user answer INHERITED_DECLINE to query " + query + "...") {
                               userInteraction.receiveAnswer(query, INHERITED_DECLINE)
                             } executeAndThen { _ => unlock(list) }
                           })
@@ -283,7 +290,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                           28,
                           _ => {
                             lock(list)
-                            asynchronouslyInNewWorker("Processing user answer ROLLBACK to query " + query) {
+                            asynchronouslyInNewWorker("Processing user answer ROLLBACK to query " + query + "...") {
                               userInteraction.receiveAnswer(query, ROLLBACK)
                             } executeAndThen { _ => unlock(list) }
                           })
@@ -309,11 +316,12 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       val userInterface = new UserInterface() {
                         override def showQuestion(query: Query): Unit =
                           invokeLaterOnProtegeThread {
-                            println("New query: " + query)
                             repairSeedInteractionAxiomList.add(query)
                           }
                         override def removeQuestion(query: Query): Unit =
-                          invokeLaterOnProtegeThread { repairSeedInteractionAxiomList.remove(query) }
+                          invokeLaterOnProtegeThread {
+                            repairSeedInteractionAxiomList.remove(query)
+                          }
                       }
 
                       panel.add(breakingJLabel("Please carefully assess each of the below axioms.  More specifically, please accept each valid axiom and decline each invalid axiom.  If you are unsure, you could also ignore some axioms, but then the repair might not be satisfactory.  After all questions have been considered, the induced optimal repair will be computed by clicking the below button."), BorderLayout.NORTH)
@@ -327,7 +335,8 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                         userInteraction.dispose()
                         userInteraction.getRepairSeed()
                       } inParallelWith asynchronouslyInNewWorker("Checking if the input ontology is acyclic...") {
-                        IQSaturation().isAcyclic
+//                        IQSaturation().isAcyclic
+                        repairConfiguration.iqSaturation.isAcyclic
                       } executeAndThen {
                         (repairSeed, isAcyclic) => {
                           nextButton.enableWithSingleAction {
@@ -385,14 +394,14 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                               panel.repaint()
                               val queryLanguage = queryLanguageRadioButtons.keys.find(_.isSelected).map(queryLanguageRadioButtons).get
                               val compatibilityMode = compatibilityModeRadioButtons.keys.find(_.isSelected).map(compatibilityModeRadioButtons).get
-                              asynchronouslyInNewWorker {
+                              asynchronouslyInNewWorker("Computing the repair...") {
                                 Repair(queryLanguage, repairSeed).compute(compatibilityMode)
                               } executeAndThen {
                                 repair => {
                                   nextButton.enableWithSingleActionListener(_ => {
                                     /* State 5: All Tasks Finished */
                                     getOWLModelManager.getOWLOntologyManager.removeImpendingOntologyChangeListener(impendingOWLOntologyChangeListener)
-                                    asynchronouslyInNewWorker {
+                                    asynchronouslyInNewWorker("Overwriting the active ontology with the repaired ontology...") {
                                       getOWLModelManager.getOWLOntologyManager.removeAxioms(activeOntology, activeOntology.getABoxAxioms(Imports.INCLUDED))
                                       getOWLModelManager.getOWLOntologyManager.addAxioms(activeOntology, repair.getABoxAxioms(Imports.INCLUDED))
                                     } executeAndThen {

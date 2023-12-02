@@ -21,7 +21,7 @@ import scala.jdk.CollectionConverters.*
 enum Strategy(val name: String, val description: String) {
   case FAST extends Strategy("Fast", "Strategy as described in the JELIA 2023 paper, which constructs a repair seed with fewest number of questions.")
   case SMARTv1 extends Strategy("Smart v1", "Experimental strategy that runs in three stages: first like the strategy Fast, then determines the difference between the saturated and the unsaturated repair induced by the repair seed from Phase 1, and finally again like strategy Fast but now for the declined queries from Phase 2.")
-  case SMARTv2 extends Strategy("Smart v2", "TBA")
+  case SMARTv2 extends Strategy("Smart v2 (recommended)", "Recommended Strategy, which only generates questions in the enviroment of the provided unwanted consequences in the repair request. It runs in two stages: in Phase 1 premises/causes for the unwanted consequences are identified, in Phase 2 the difference between the saturated and the unsaturated repair induced by the repair seed from Phase 1 is determined to generate additional questions.  Simply put, these are axioms the deduction of which from the input ontology necessarily generates some of the axioms from Phase 1 identified as to be removed.")
   case BEST extends Strategy("Best", "Strategy as described in the KR 2022 paper, which can construct every repair seed.")
 }
 
@@ -211,14 +211,14 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
   override def start(userInterface: UserInterface): Unit = {
     super.start(userInterface)
     println("Phase 1 running ...")
-    asynchronouslyInNewWorker {
+    asynchronouslyInNewWorker("Waiting for completion of Phase 1...") {
       while !super.hasBeenCompleted() do Thread.sleep(100)
     } executeAndThen {
       println("Initializing phase 2 ...")
       initializePhase2()
       phase = 2
       println("Phase 2 running ...")
-      asynchronouslyInNewWorker {
+      asynchronouslyInNewWorker("Waiting for completion of Phase 2...") {
         while pendingPhase2Queries.nonEmpty do Thread.sleep(100)
       } executeAndThen {
         println("Initializing phase 3 ...")
@@ -234,10 +234,12 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
     val saturatedRepair = IQRepair(seed, true)
     val unsaturatedRepair = IQRepair(seed, false)
     val unsaturatedRepairReasoner =
-      ELReasoner(
-        unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS).getAxioms(Imports.INCLUDED).asScala.asInstanceOf[collection.Set[ELAxiom]],
+      // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
+      ExtendedClassification(
+        unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS),
         configuration.subClassExpressions,
-        false)
+        false,
+        true)
 
     for {
       individual <- configuration.ontologyReasoner.instances(OWLThing)
@@ -288,8 +290,6 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
 
 class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends UserInteraction() {
 
-  println("Initializing smart user interaction v2")
-
   private val isCurrentlyProcessing = AtomicInteger(0)
   @volatile private var inPhase2 = false
 
@@ -300,12 +300,14 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
   private val declinedQueries = ConcurrentHashMap.newKeySet[Query]().asScala
   private val inheritedAnswers = ConcurrentHashMap[Query, Answer]().asScala
 
-  private val acceptedQueriesReasoner =
-    ELReasoner(
-      configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala,
-      configuration.subClassExpressions,
-      false
-    )
+//  private val acceptedQueriesReasoner =
+//    // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
+//    ExtendedClassification(
+//      configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala,
+//      configuration.subClassExpressions,
+//      false
+//    )
+  private val acceptedQueriesABoxIndex = configuration.ontologyReasoner.registerABox(Set.empty)
 
   private def isUndecided(query: Query): Boolean = {
     !(acceptedQueries contains query) && !(declinedQueries contains query)
@@ -327,45 +329,42 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
   }
 
   override protected def initialize(): Unit = {
-    println("Initializing phase 1 ...")
     // processDeclinedQueries(configuration.request.axioms filter configuration.ontologyReasoner.entails, false)
     processDeclinedQueries(configuration.request.axioms, false)
-    println("Phase 1 running ...")
-    asynchronouslyInNewWorker {
+    asynchronouslyInNewWorker("Waiting for completion of Phase 1...") {
       while !((isCurrentlyProcessing.get() equals 0) && pendingQueries.isEmpty) do Thread.sleep(100)
     } executeAndThen {
-      asynchronouslyInNewWorker {
-        println("Initializing phase 2 ...")
+      asynchronouslyInNewWorker("Initializing Phase 2...") {
         initializePhase2()
         inPhase2 = true
-        println("Phase 2 running ...")
       }.execute
     }
   }
 
   private def initializePhase2(): Unit = {
-    println("Initializing saturated and unsaturated repair")
     val seed = getRepairSeedUnchecked()
-    val saturatedRepair = IQRepair(seed, true)
-    val unsaturatedRepair = IQRepair(seed, false)
-    val unsaturatedRepairComputed = unsaturatedRepair.compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS)
-    println("Initializing unsaturated repair reasoner")
-    val unsaturatedRepairReasoner =
-      ELReasoner(
-        unsaturatedRepairComputed,
-        configuration.subClassExpressions,
-        false)
-    println("Identifying questions")
+    val saturatedRepairVirtual = IQRepair(seed, true)
+    val unsaturatedRepairComputed = IQRepair(seed, false).compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS)
+//    val unsaturatedRepairReasoner =
+//      // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
+//      ExtendedClassification(
+//        unsaturatedRepairComputed,
+//        configuration.subClassExpressions,
+//        false,
+//        true)
+    val unsaturatedRepairABoxIndex = configuration.ontologyReasoner.registerABox(unsaturatedRepairComputed, true)
     for {
-      individual <- configuration.ontologyReasoner.instances(OWLThing)
+      individual <- configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
       // classExpression <- minimalElements(configuration.ontologyReasoner.types(individual), _ isSubsumedBy _ wrt configuration.trivialReasoner)
       classExpression <- configuration.ontologyReasoner.types(individual).filter(_.isAtom)
     }
       val query = individual Type classExpression
-      if isUndecided(query) && (saturatedRepair entails query) && !(unsaturatedRepairReasoner entails query) then
+//      if isUndecided(query) && (saturatedRepair entails query) && !(unsaturatedRepairReasoner entails query) then
+      if isUndecided(query) && (saturatedRepairVirtual entails query) && !configuration.ontologyReasoner.entails(unsaturatedRepairABoxIndex, query) then
         pendingQueries += query
         userInterface.showQuestion(query)
-    unsaturatedRepairReasoner.dispose()
+//    unsaturatedRepairReasoner.dispose()
+    configuration.ontologyReasoner.unregisterABox(unsaturatedRepairABoxIndex)
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
@@ -387,7 +386,8 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 
   private def processAcceptedQuery(query: Query, inheritedAccept: Boolean): Unit = {
     acceptedQueries += query
-    acceptedQueriesReasoner.addAxiomAndFlush(query)
+//    acceptedQueriesReasoner.addAxiomAndFlush(query)
+    configuration.ontologyReasoner.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
     if inheritedAccept then
       if inheritedAnswersMustBeConfirmed then
         inheritedAnswers(query) = INHERITED_ACCEPT
@@ -398,13 +398,11 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
   }
 
   private def processDeclinedQueries(queries: Iterable[Query], inheritedDecline: Boolean): Unit = {
-    print("processing declined queries")
     val undecidedQueries_Conjunction = mutable.HashSet[OWLClassAssertionAxiom]()
     val undecidedQueries_ExistentialRestriction = mutable.HashSet[OWLClassAssertionAxiom]()
 
     val processedQueries = mutable.HashSet[Query]()
     @tailrec def recursivelyProcess(currentDeclinedQueries: Iterable[Query], inheritedDecline: Boolean): Unit = {
-      print(".")
       processedQueries ++= currentDeclinedQueries
       val nextDeclinedQueries = mutable.HashSet[Query]()
       currentDeclinedQueries.foreach {
@@ -444,12 +442,9 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
     }
 
     recursivelyProcess(queries, inheritedDecline)
-    println()
-    print("Generating questions")
 
     undecidedQueries_Conjunction.foreach {
       case _@ClassAssertion(_, classExpression, individual) =>
-        print(".")
         classExpression.topLevelConjuncts().foreach {
           atom =>
             val query = individual Type atom
@@ -461,7 +456,6 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 
     undecidedQueries_ExistentialRestriction.foreach {
       case ClassAssertion(_, ObjectSomeValuesFrom(property@ObjectProperty(_), filler), individual) =>
-        print(".")
         roleAssertions.foreach {
           case roleAssertion@ObjectPropertyAssertion(_, qroperty, subject, target) =>
             if (property equals qroperty)
@@ -477,20 +471,22 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
         }
     }
 
-    println()
-
     findNewInheritedAnswers()
   }
 
   private def findNewInheritedAnswers(): Unit = {
     val nextDeclinedQueries = mutable.HashSet[Query]()
     (pendingQueries filterNot inheritedAnswers.keySet).foreach(query => {
-      if acceptedQueriesReasoner entails query then
+//      if acceptedQueriesReasoner entails query then
+      if configuration.ontologyReasoner.entails(acceptedQueriesABoxIndex, query) then
         processAcceptedQuery(query, true)
       else if {
-        acceptedQueriesReasoner.addAxiomAndFlush(query)
-        val inheritedDecline = declinedQueries.exists(acceptedQueriesReasoner.entails)
-        acceptedQueriesReasoner.removeAxiomAndFlush(query)
+//        acceptedQueriesReasoner.addAxiomAndFlush(query)
+//        val inheritedDecline = declinedQueries.exists(acceptedQueriesReasoner.entails)
+//        acceptedQueriesReasoner.removeAxiomAndFlush(query)
+        configuration.ontologyReasoner.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
+        val inheritedDecline = declinedQueries.exists(configuration.ontologyReasoner.entails(acceptedQueriesABoxIndex, _))
+        configuration.ontologyReasoner.removeAxiomAndFlush(acceptedQueriesABoxIndex, query)
         inheritedDecline
       } then
         nextDeclinedQueries += query
@@ -507,14 +503,18 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
           // Compute all justifications why `query` is entailed by `acceptedQueries`
         case INHERITED_DECLINE =>
           // To be able to accept the query, wrongly declined queries need to be identified.
-          acceptedQueriesReasoner.addAxiomAndFlush(query)
-          val candidates = declinedQueries.filter(acceptedQueriesReasoner.entails)
-          acceptedQueriesReasoner.removeAxiomAndFlush(query)
+//          acceptedQueriesReasoner.addAxiomAndFlush(query)
+//          val candidates = declinedQueries.filter(acceptedQueriesReasoner.entails)
+//          acceptedQueriesReasoner.removeAxiomAndFlush(query)
+          configuration.ontologyReasoner.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
+          val candidates = declinedQueries.filter(configuration.ontologyReasoner.entails(acceptedQueriesABoxIndex, _))
+          configuration.ontologyReasoner.removeAxiomAndFlush(acceptedQueriesABoxIndex, query)
     }: @nowarn
   }
 
   override def dispose(): Unit = {
-    acceptedQueriesReasoner.dispose()
+//    acceptedQueriesReasoner.dispose()
+    configuration.ontologyReasoner.unregisterABox(acceptedQueriesABoxIndex)
   }
 
 }
@@ -527,7 +527,8 @@ class BestUserInteraction()(using configuration: RepairConfiguration, ontologyMa
   private val repairTemplate = mutable.HashSet[Query]()
   private val particularizedRepairRequest = mutable.HashSet.from(configuration.request.axioms)
   private val tboxAxioms = configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala
-  private val templateReasoner = ELReasoner(tboxAxioms, configuration.subClassExpressions, false)
+  // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
+  private val templateReasoner = ExtendedClassification(tboxAxioms, configuration.subClassExpressions, false)
   private val remainingQueries = mutable.HashSet.from[Query](atomicClassAssertions)
 
   override protected def initialize(): Unit = {

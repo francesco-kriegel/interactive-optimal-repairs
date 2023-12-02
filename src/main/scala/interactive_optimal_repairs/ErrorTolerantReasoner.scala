@@ -5,8 +5,10 @@ import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
 
 import org.phenoscape.scowl.*
-import org.semanticweb.owlapi.model.{OWLClassExpression, OWLObjectPropertyAssertionAxiom, OWLOntologyManager}
+//import org.semanticweb.owlapi.model.parameters.Imports
+import org.semanticweb.owlapi.model.{OWLAxiom, OWLClassExpression, OWLObjectPropertyAssertionAxiom, OWLOntologyManager}
 
+//import scala.jdk.CollectionConverters.*
 import scala.jdk.StreamConverters.*
 
 trait ErrorTolerantReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) {
@@ -17,9 +19,14 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration, ontologyMa
       val subClassExpressions: collection.Set[OWLClassExpression] =
         queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
           configuration.request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
-      val reasoner: ELReasoner = ELReasoner(queries, subClassExpressions, true)
-      val result = !configuration.request.axioms.exists(reasoner.entails)
-      reasoner.dispose()
+//      // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
+//      val reasoner = ExtendedClassification(queries ++ configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala, subClassExpressions, true)
+//      val result = !configuration.request.axioms.exists(reasoner.entails)
+//      reasoner.dispose()
+//      result
+      val aboxIndex = configuration.ontologyReasoner.registerABox(queries.asInstanceOf[collection.Set[OWLAxiom]])
+      val result = !configuration.request.axioms.exists(configuration.ontologyReasoner.entails(aboxIndex, _))
+      configuration.ontologyReasoner.unregisterABox(aboxIndex)
       result
     }
   }
