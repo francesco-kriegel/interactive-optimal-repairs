@@ -18,14 +18,14 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration, ontologyMa
     queries.forall(configuration.ontologyReasoner.entails) && {
       val subClassExpressions: collection.Set[OWLClassExpression] =
         queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
-          configuration.request.axioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
+          configuration.request.negativeAxioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
 //      // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
 //      val reasoner = ExtendedClassification(queries ++ configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala, subClassExpressions, true)
 //      val result = !configuration.request.axioms.exists(reasoner.entails)
 //      reasoner.dispose()
 //      result
       val aboxIndex = configuration.ontologyReasoner.registerABox(queries.asInstanceOf[collection.Set[OWLAxiom]])
-      val result = !configuration.request.axioms.exists(configuration.ontologyReasoner.entails(aboxIndex, _))
+      val result = !configuration.request.negativeAxioms.exists(configuration.ontologyReasoner.entails(aboxIndex, _))
       configuration.ontologyReasoner.unregisterABox(aboxIndex)
       result
     }
@@ -55,7 +55,7 @@ class ErrorTolerantIQReasoner(using configuration: RepairConfiguration, ontology
       } then
         val individuals = queries.collect { case ClassAssertion(_, _, individual) => individual.asOWLNamedIndividual() }
         individuals.map { individual =>
-          val minimalRepairTypes = RepairType.computeAllMinimalRepairTypes(individual, configuration.request.getClassExpressions(individual))
+          val minimalRepairTypes = RepairType.computeAllMinimalRepairTypes(individual, configuration.request.getNegativeClassExpressions(individual))
           val denominator = minimalRepairTypes.size
           val numerator = minimalRepairTypes.count { repairType =>
             queries.forall {

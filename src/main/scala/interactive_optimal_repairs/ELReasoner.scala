@@ -5,7 +5,7 @@ import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 import interactive_optimal_repairs.Util.Nominal
 
 import org.phenoscape.scowl.*
-import org.semanticweb.elk.owlapi.ElkReasonerFactory
+import org.semanticweb.elk.owlapi.{ElkReasoner, ElkReasonerFactory}
 import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.Imports
 import org.semanticweb.owlapi.reasoner.InferenceType
@@ -23,7 +23,7 @@ class ExtendedClassification(ontology: OWLOntology,
                             (using ontologyManager: OWLOntologyManager)
   extends PartialOrdering[OWLClassExpression] {
 
-  protected val localOntology = if ontologyWillNotBeAccessedOtherwise then ontology else ontologyManager.createOntology(ontology.getAxioms)
+  protected val localOntology: OWLOntology = if ontologyWillNotBeAccessedOtherwise then ontology else ontologyManager.createOntology(ontology.getAxioms)
 
   def this(axioms: collection.Set[_ <: OWLAxiom],
            classExpressions: collection.Set[OWLClassExpression],
@@ -54,7 +54,7 @@ class ExtendedClassification(ontology: OWLOntology,
     elkReasoner.flush()
   }
 
-  protected val elkReasoner = ElkReasonerFactory().createReasoner(localOntology)
+  protected val elkReasoner: ElkReasoner = ElkReasonerFactory().createReasoner(localOntology)
   // elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
 
   def dispose(): Unit = {
@@ -75,8 +75,8 @@ class ExtendedClassification(ontology: OWLOntology,
       case _ => _representativeOf(classExpression)
   }
 
-  protected val nominals = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLObjectOneOf]().asScala // mutable.HashSet[OWLObjectOneOf]()
-  protected val successors = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLObjectSomeValuesFrom]().asScala // mutable.HashSet[OWLObjectSomeValuesFrom]()
+  protected val nominals: mutable.Set[OWLObjectOneOf] = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLObjectOneOf]().asScala // mutable.HashSet[OWLObjectOneOf]()
+  protected val successors: mutable.Set[OWLObjectSomeValuesFrom] = java.util.concurrent.ConcurrentHashMap.newKeySet[OWLObjectSomeValuesFrom]().asScala // mutable.HashSet[OWLObjectSomeValuesFrom]()
 
   def addClassExpression(classExpression: OWLClassExpression): Unit = {
     if (allowNewClassExpressions)
@@ -171,7 +171,7 @@ class ExtendedClassification(ontology: OWLOntology,
   def types(individual: OWLIndividual): LazyList[OWLClassExpression] = {
     // TODO: treat anonymous individuals
     (if nominals contains Nominal(individual.asOWLNamedIndividual()) then LazyList(Nominal(individual.asOWLNamedIndividual())) else LazyList.empty) concat
-      (successors.filter { case ObjectSomeValuesFrom(property@ObjectProperty(_), _@Nominal(target)) => elkReasoner.isEntailed(individual.asOWLNamedIndividual() Fact(property, target)); case _ => false }) concat
+      successors.filter { case ObjectSomeValuesFrom(property@ObjectProperty(_), _@Nominal(target)) => elkReasoner.isEntailed(individual.asOWLNamedIndividual() Fact(property, target)); case _ => false } concat
       elkReasoner.types(individual.asOWLNamedIndividual()).toScala(LazyList).map(representativeFor.orElse(c => c))
   }
 
@@ -314,20 +314,35 @@ private class ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology: OW
   }
 
   def unregisterABox(aboxIndex: Integer): Unit = {
+    clearABox(aboxIndex)
+    unregisteredABoxIndices += aboxIndex
+  }
+
+  def clearABox(aboxIndex: Integer): Unit = {
+    replaceABox(aboxIndex, Set.empty)
+  }
+
+  def replaceABox(aboxIndex: Integer, axioms: collection.Set[OWLAxiom]): Unit = {
     checkABoxIndex(aboxIndex)
     iRepresentativeForMaps(aboxIndex).keySet.foreach { representative =>
       ontologyManager.removeAxioms(localOntology, localOntology.getAxioms(representative, Imports.EXCLUDED))
     }
-    elkReasoner.flush()
     iRepresentativeOfMaps(aboxIndex).clear()
     iRepresentativeForMaps(aboxIndex).clear()
-    unregisteredABoxIndices += aboxIndex
+    axioms.foreach {
+      case ClassAssertion(_, classExpression, individual) =>
+        super.addAxiom(getRepresentativeOf(aboxIndex, individual) Type classExpression)
+      case ObjectPropertyAssertion(_, property, subject, target) =>
+        super.addAxiom(getRepresentativeOf(aboxIndex, subject) Fact(property, getRepresentativeOf(aboxIndex, target)))
+    }
+    elkReasoner.flush()
+    elkReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS)
   }
 
   private def getRepresentativeOf(aboxIndex: Integer, individual: OWLIndividual): OWLIndividual = {
     //checkABoxIndex(aboxIndex)
     if !(iRepresentativeOfMaps(aboxIndex) contains individual) then
-      val representative = Individual("abox_" + currentABoxIndex + "_internal_representative_individual_of#" + individual)
+      val representative = Individual("abox_" + aboxIndex + "_internal_representative_individual_of#" + individual)
       iRepresentativeOfMaps(aboxIndex)(individual) = representative
       iRepresentativeForMaps(aboxIndex)(representative) = individual
       representative

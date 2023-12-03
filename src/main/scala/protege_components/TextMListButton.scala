@@ -36,18 +36,18 @@ class TextMListButton(tooltipText: String, rollOverColor: Color, buttonText: Str
    * org.exquisite.protege.ui.buttons.UnicodeButton in the Ontology Debugger Plugin for Protégé
    * @see https://git-ainf.aau.at/interactive-KB-debugging/debugger/blob/4a2e4c8ee36a8f63bf7facd099021420b0621cc9/protege-plugin/src/main/java/org/exquisite/protege/ui/buttons/UnicodeButton.java
    */
-  override def paintButtonContent(g: Graphics2D) = {
+  override def paintButtonContent(g: Graphics2D): Unit = {
     g.setColor(Color.WHITE)
-    g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, buttonTextSize));
-    val stringWidth = g.getFontMetrics().getStringBounds(buttonText, g).getBounds().width;
-    val w = getBounds().width;
-    val h = getBounds().height;
+    g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, buttonTextSize))
+    val stringWidth = g.getFontMetrics().getStringBounds(buttonText, g).getBounds.width
+    val w = getBounds.width
+    val h = getBounds.height
     g.drawString(
       buttonText,
-      getBounds().x + w / 2 - stringWidth / 2,
-      getBounds().y + g.getFontMetrics().getAscent() / 2 + h / 2 - 2);
+      getBounds.x + w / 2 - stringWidth / 2,
+      getBounds.y + g.getFontMetrics().getAscent / 2 + h / 2 - 2)
   }
 
-  override protected def getSizeMultiple(): Int = { 4 }
+  override protected def getSizeMultiple: Int = { 4 }
 
 }

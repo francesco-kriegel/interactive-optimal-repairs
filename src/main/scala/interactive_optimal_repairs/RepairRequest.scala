@@ -4,12 +4,10 @@ package interactive_optimal_repairs
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
 
-class RepairRequest(val axioms: collection.Set[Query]) {
+class RepairRequest(val negativeAxioms: collection.Set[Query], val positiveAxioms: collection.Set[Query]) {
 
-  def this(axioms: Query*) = this(axioms.toSet)
-
-  def getClassExpressions(individual: OWLNamedIndividual): Set[OWLClassExpression] = {
-    axioms.collect({
+  def getNegativeClassExpressions(individual: OWLNamedIndividual): Set[OWLClassExpression] = {
+    negativeAxioms.collect({
       case ClassAssertion(annotations, classExpression, jndividual)
         if individual == jndividual => classExpression
     }).toSet

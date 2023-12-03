@@ -16,7 +16,7 @@ private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with Backgr
       evt.getNewValue.asInstanceOf[SwingWorker.StateValue] match
         case SwingWorker.StateValue.PENDING => // Do nothing.
         case SwingWorker.StateValue.STARTED => ProtegeApplication.getBackgroundTaskManager.startTask(this)
-        case SwingWorker.StateValue.DONE => ProtegeApplication.getBackgroundTaskManager().endTask(this)
+        case SwingWorker.StateValue.DONE => ProtegeApplication.getBackgroundTaskManager.endTask(this)
   })
 
   var message: String = ""
@@ -54,14 +54,14 @@ private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with Backgr
 
 }
 
-object ProtegeWorker {
+class ProtegeWorkerPool {
 
   //private val activeWorkers = collection.mutable.ListBuffer[ProtegeWorker[_, Void]]()
   private val activeWorkers = ConcurrentHashMap.newKeySet[ProtegeWorker[_, Void]]().asScala
 
   private object nextInt {
     private[this] var n = 0
-    def apply() = { n += 1; n }
+    def apply(): Int = { n += 1; n }
   }
 
   def asynchronouslyInNewWorker[T](code: => T): ProtegeWorker[T, Void] =

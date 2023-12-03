@@ -45,7 +45,7 @@ object Util {
         case c @ Class(_) => !(c equals OWLThing)
         case ObjectSomeValuesFrom(_, _) => true
         case ObjectHasValue(_, _@NamedIndividual(_)) => true
-        case ObjectOneOf(individuals) if (individuals.size == 1) && (individuals.head.isNamed) => true
+        case ObjectOneOf(individuals) if (individuals.size == 1) && individuals.head.isNamed => true
         case _ => false
 
     lazy val isClass: Boolean =
@@ -102,11 +102,11 @@ object Util {
         case OWLThing =>
           "⊤"
         case Class(iri) =>
-          iri.toString()
+          iri.toString
         case ObjectOneOf(is) if is.size == 1 =>
           "{" + is.head.toDLString + "}"
         case ObjectSomeValuesFrom(property@ObjectProperty(iri), filler) =>
-          "∃" + iri.toString() + "." + filler.toDLString
+          "∃" + iri.toString + "." + filler.toDLString
         case ObjectIntersectionOf(operands) =>
           if (operands.isEmpty)
             "⊤"

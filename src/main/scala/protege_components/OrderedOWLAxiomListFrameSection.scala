@@ -40,7 +40,7 @@ private class OrderedOWLAxiomListFrameSection[Ax <: OWLAxiom](sectionLabel: Stri
 //      val ax = var2.next.asInstanceOf[Ax]
 //      if (!this.added.contains(ax)) this.addRow(OrderedOWLAxiomListFrameSectionRow(this.getOWLEditorKit, this, null.asInstanceOf[OWLOntology], this.getRootObject.asInstanceOf[util.Set[Ax]], ax))
 //    }
-    val axioms = this.getRootObject.asInstanceOf[util.Set[Ax]]
+    val axioms = this.getRootObject
     axioms.forEach(ax =>
       this.addRow(OrderedOWLAxiomListFrameSectionRow(ax, this, axioms)))
   }

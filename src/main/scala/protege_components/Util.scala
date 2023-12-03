@@ -24,14 +24,14 @@ package de.tu_dresden.inf.lat
 package protege_components
 
 import java.awt.event.ActionListener
-import java.awt.{BorderLayout, GridBagConstraints, Insets}
+import java.awt.{BorderLayout, Dimension, GridBagConstraints, Insets}
 import java.lang.reflect.InvocationTargetException
 import javax.swing.*
 
 object Util {
 
-  private def runOnProtegeThread(runnable: Runnable, sync: Boolean) = {
-    if (SwingUtilities.isEventDispatchThread()) {
+  private def runOnProtegeThread(runnable: Runnable, sync: Boolean): Unit = {
+    if (SwingUtilities.isEventDispatchThread) {
       runnable.run()
     } else {
       try {
@@ -41,7 +41,7 @@ object Util {
           SwingUtilities.invokeLater(runnable)
       } catch {
         case e: Error =>
-          if (e.getMessage().equals("Cannot call invokeAndWait from the event dispatcher thread")) {
+          if (e.getMessage.equals("Cannot call invokeAndWait from the event dispatcher thread")) {
             runnable.run()
           } else throw RuntimeException(e)
         case e @ (_: InvocationTargetException | _: InterruptedException) => throw RuntimeException(e)
@@ -49,15 +49,15 @@ object Util {
     }
   }
 
-  def synchronouslyOnProtegeThread(code: => Unit) = {
+  def synchronouslyOnProtegeThread(code: => Unit): Unit = {
     runOnProtegeThread(() => code, true)
   }
 
-  def asynchronouslyOnProtegeThread(code: => Unit) = {
+  def asynchronouslyOnProtegeThread(code: => Unit): Unit = {
     runOnProtegeThread(() => code, false)
   }
 
-  def invokeLaterOnProtegeThread(code: => Unit) = {
+  def invokeLaterOnProtegeThread(code: => Unit): Unit = {
     SwingUtilities.invokeLater(() => { code })
   }
 
@@ -108,6 +108,24 @@ object Util {
     }
     def enableWithSingleAction(code: => Unit): Unit = {
       enableWithSingleActionListener(_ => { code })
+    }
+
+    def setFixedSize(size: Dimension): Unit = {
+      button.setMinimumSize(size)
+      button.setPreferredSize(size)
+      button.setMaximumSize(size)
+    }
+  }
+
+  extension(container: java.awt.Container) {
+    def _add(comp: java.awt.Component): java.awt.Container = {
+      container.add(comp)
+      container
+    }
+
+    def _add(comp: java.awt.Component, constraints: AnyRef): java.awt.Container = {
+      container.add(comp, constraints)
+      container
     }
   }
 

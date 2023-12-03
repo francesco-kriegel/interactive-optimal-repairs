@@ -5,7 +5,7 @@ import interactive_optimal_repairs.Answer.*
 import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Strategy.*
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
-import protege_components.ProtegeWorker.asynchronouslyInNewWorker
+import protege_components.ProtegeWorkerPool
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
@@ -35,7 +35,7 @@ enum Answer {
 }
 
 object UserInteraction {
-  def apply(strategy: Strategy)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager): UserInteraction =
+  def apply(strategy: Strategy)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager, p: ProtegeWorkerPool): UserInteraction =
     strategy match
       case FAST => FastUserInteraction()
       case SMARTv1 => Smart1UserInteraction()
@@ -53,13 +53,13 @@ abstract class UserInteraction()(using configuration: RepairConfiguration) {
 
   protected def initialize(): Unit
   def receiveAnswer(query: Query, answer: Answer): Unit
-  def hasBeenCompleted(): Boolean
-  protected def getRepairSeedUnchecked(): RepairSeed
-  def getRepairSeed(): RepairSeed = {
-    if !hasBeenCompleted() then
+  def hasBeenCompleted: Boolean
+  protected def getRepairSeedUnchecked: RepairSeed
+  def getRepairSeed: RepairSeed = {
+    if !hasBeenCompleted then
       throw IllegalStateException("A repair seed has not been determined since the user interaction has not been completed.")
     else
-      getRepairSeedUnchecked()
+      getRepairSeedUnchecked
   }
   def getButtonTypes(query: Query): collection.Set[Answer]
   def dispose(): Unit
@@ -69,13 +69,13 @@ abstract class UserInteraction()(using configuration: RepairConfiguration) {
 /* This strategy is described in the JELIA 2023 paper. */
 class FastUserInteraction()(using configuration: RepairConfiguration) extends UserInteraction() {
 
-  protected val repairSeed = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
-  protected val nonDeclinedRoleAssertions = ConcurrentHashMap.newKeySet[OWLObjectPropertyAssertionAxiom]().asScala
-  protected val pendingQueries_Conjunction = ConcurrentHashMap[OWLClassAssertionAxiom, mutable.HashSet[OWLClassAssertionAxiom]]().asScala
-              // contains entries a:C₁⊓...⊓Cₙ ⟼ a:C₁ | ... | a:Cₙ
-  protected val pendingQueries_ExistentialRestriction = ConcurrentHashMap[(OWLIndividual, OWLObjectProperty, OWLIndividual, OWLClassExpression), (OWLObjectPropertyAssertionAxiom, OWLClassAssertionAxiom)]().asScala
-              // contains entries (a,r,b,C) ⟼ (a,b):r | b:C
-  protected val isCurrentlyProcessing = AtomicInteger(0)
+  protected val repairSeed: mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]] = mutable.HashMap[OWLNamedIndividual, mutable.HashSet[OWLClassExpression]]()
+  protected val nonDeclinedRoleAssertions: mutable.Set[OWLObjectPropertyAssertionAxiom] = ConcurrentHashMap.newKeySet[OWLObjectPropertyAssertionAxiom]().asScala
+  protected val pendingQueries_Conjunction: mutable.Map[OWLClassAssertionAxiom, mutable.HashSet[OWLClassAssertionAxiom]] = ConcurrentHashMap[OWLClassAssertionAxiom, mutable.HashSet[OWLClassAssertionAxiom]]().asScala
+  // contains entries a:C₁⊓...⊓Cₙ ⟼ a:C₁ | ... | a:Cₙ
+  protected val pendingQueries_ExistentialRestriction: mutable.Map[(OWLIndividual, OWLObjectProperty, OWLIndividual, OWLClassExpression), (OWLObjectPropertyAssertionAxiom, OWLClassAssertionAxiom)] = ConcurrentHashMap[(OWLIndividual, OWLObjectProperty, OWLIndividual, OWLClassExpression), (OWLObjectPropertyAssertionAxiom, OWLClassAssertionAxiom)]().asScala
+  // contains entries (a,r,b,C) ⟼ (a,b):r | b:C
+  protected val isCurrentlyProcessing: AtomicInteger = AtomicInteger(0)
 
   protected def processDeclinedQueries(queries: Iterable[Query]): Unit = {
     val undecidedQueries_Conjunction = mutable.HashSet[OWLClassAssertionAxiom]()
@@ -171,7 +171,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
       case roleAssertion: OWLObjectPropertyAssertionAxiom => nonDeclinedRoleAssertions += roleAssertion
       case _ => // Do nothing.
     }
-    processDeclinedQueries(configuration.request.axioms.filter { configuration.ontologyReasoner.entails })
+    processDeclinedQueries(configuration.request.negativeAxioms.filter { configuration.ontologyReasoner.entails })
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
@@ -183,11 +183,11 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
     isCurrentlyProcessing.decrementAndGet()
   }
 
-  override def hasBeenCompleted(): Boolean = {
+  override def hasBeenCompleted: Boolean = {
     isCurrentlyProcessing.get() == 0 && pendingQueries_Conjunction.isEmpty && pendingQueries_ExistentialRestriction.isEmpty
   }
 
-  override protected def getRepairSeedUnchecked(): RepairSeed = {
+  override protected def getRepairSeedUnchecked: RepairSeed = {
     val axioms = repairSeed.flatMap((individual, atoms) => atoms.map(atom => individual Type atom))
     RepairSeed(true, axioms.toSeq: _*)
   }
@@ -202,7 +202,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
 
 }
 
-class Smart1UserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends FastUserInteraction() {
+class Smart1UserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager, p: ProtegeWorkerPool) extends FastUserInteraction() {
 
   private var phase = 1
   private val pendingPhase2Queries = ConcurrentHashMap.newKeySet[Query]().asScala
@@ -211,14 +211,14 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
   override def start(userInterface: UserInterface): Unit = {
     super.start(userInterface)
     println("Phase 1 running ...")
-    asynchronouslyInNewWorker("Waiting for completion of Phase 1...") {
-      while !super.hasBeenCompleted() do Thread.sleep(100)
+    p.asynchronouslyInNewWorker("Waiting for completion of Phase 1...") {
+      while !super.hasBeenCompleted do Thread.sleep(100)
     } executeAndThen {
       println("Initializing phase 2 ...")
       initializePhase2()
       phase = 2
       println("Phase 2 running ...")
-      asynchronouslyInNewWorker("Waiting for completion of Phase 2...") {
+      p.asynchronouslyInNewWorker("Waiting for completion of Phase 2...") {
         while pendingPhase2Queries.nonEmpty do Thread.sleep(100)
       } executeAndThen {
         println("Initializing phase 3 ...")
@@ -230,7 +230,7 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
   }
 
   private def initializePhase2(): Unit = {
-    val seed = getRepairSeedUnchecked()
+    val seed = getRepairSeedUnchecked
     val saturatedRepair = IQRepair(seed, true)
     val unsaturatedRepair = IQRepair(seed, false)
     val unsaturatedRepairReasoner =
@@ -254,7 +254,7 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
-    if (phase equals 2) then
+    if phase equals 2 then
       isCurrentlyProcessing.incrementAndGet()
       pendingPhase2Queries -= query
       userInterface.removeQuestion(query)
@@ -271,8 +271,8 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
     processDeclinedQueries(declinedPhase2Queries)
   }
 
-  override def hasBeenCompleted(): Boolean = {
-    (phase equals 3) && super.hasBeenCompleted()
+  override def hasBeenCompleted: Boolean = {
+    (phase equals 3) && super.hasBeenCompleted
   }
 
   override def getButtonTypes(query: Query): collection.Set[Answer] = {
@@ -288,7 +288,7 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
 
 }
 
-class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends UserInteraction() {
+class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager, p: ProtegeWorkerPool) extends UserInteraction() {
 
   private val isCurrentlyProcessing = AtomicInteger(0)
   @volatile private var inPhase2 = false
@@ -297,6 +297,7 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 
   private val pendingQueries = ConcurrentHashMap.newKeySet[Query]().asScala
   private val acceptedQueries = ConcurrentHashMap.newKeySet[Query]().asScala
+  acceptedQueries ++= configuration.request.positiveAxioms
   private val declinedQueries = ConcurrentHashMap.newKeySet[Query]().asScala
   private val inheritedAnswers = ConcurrentHashMap[Query, Answer]().asScala
 
@@ -307,17 +308,17 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 //      configuration.subClassExpressions,
 //      false
 //    )
-  private val acceptedQueriesABoxIndex = configuration.ontologyReasoner.registerABox(Set.empty)
+  private val acceptedQueriesABoxIndex = configuration.ontologyReasoner.registerABox(configuration.request.positiveAxioms.asInstanceOf[collection.Set[OWLAxiom]])
 
   private def isUndecided(query: Query): Boolean = {
     !(acceptedQueries contains query) && !(declinedQueries contains query)
   }
 
-  override def hasBeenCompleted(): Boolean = {
+  override def hasBeenCompleted: Boolean = {
     inPhase2 && (isCurrentlyProcessing.get() equals 0) && pendingQueries.isEmpty
   }
 
-  override protected def getRepairSeedUnchecked(): RepairSeed = {
+  override protected def getRepairSeedUnchecked: RepairSeed = {
     RepairSeed(true, declinedQueries collect { case ax: OWLClassAssertionAxiom => ax })
   }
 
@@ -330,19 +331,19 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 
   override protected def initialize(): Unit = {
     // processDeclinedQueries(configuration.request.axioms filter configuration.ontologyReasoner.entails, false)
-    processDeclinedQueries(configuration.request.axioms, false)
-    asynchronouslyInNewWorker("Waiting for completion of Phase 1...") {
+    processDeclinedQueries(configuration.request.negativeAxioms, false)
+    p.asynchronouslyInNewWorker("Waiting for completion of Phase 1...") {
       while !((isCurrentlyProcessing.get() equals 0) && pendingQueries.isEmpty) do Thread.sleep(100)
     } executeAndThen {
-      asynchronouslyInNewWorker("Initializing Phase 2...") {
+      p.asynchronouslyInNewWorker("Initializing Phase 2...") {
         initializePhase2()
         inPhase2 = true
-      }.execute
+      }.execute()
     }
   }
 
   private def initializePhase2(): Unit = {
-    val seed = getRepairSeedUnchecked()
+    val seed = getRepairSeedUnchecked
     val saturatedRepairVirtual = IQRepair(seed, true)
     val unsaturatedRepairComputed = IQRepair(seed, false).compute(CompatibilityMode.FRESH_NAMED_INDIVIDUALS)
 //    val unsaturatedRepairReasoner =
@@ -352,6 +353,7 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 //        configuration.subClassExpressions,
 //        false,
 //        true)
+    ontologyManager.addAxioms(unsaturatedRepairComputed, acceptedQueries.asJava)
     val unsaturatedRepairABoxIndex = configuration.ontologyReasoner.registerABox(unsaturatedRepairComputed, true)
     for {
       individual <- configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
@@ -525,7 +527,7 @@ class BestUserInteraction()(using configuration: RepairConfiguration, ontologyMa
   private val individuals = configuration.ontologyReasoner.instances(OWLThing)
   private val atomicClassAssertions = individuals.flatMap(individual => configuration.ontologyReasoner.types(individual).filter(_.isAtom).map(atom => individual Type atom))
   private val repairTemplate = mutable.HashSet[Query]()
-  private val particularizedRepairRequest = mutable.HashSet.from(configuration.request.axioms)
+  private val particularizedRepairRequest = mutable.HashSet.from(configuration.request.negativeAxioms)
   private val tboxAxioms = configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala
   // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
   private val templateReasoner = ExtendedClassification(tboxAxioms, configuration.subClassExpressions, false)
@@ -569,11 +571,11 @@ class BestUserInteraction()(using configuration: RepairConfiguration, ontologyMa
     })
   }
 
-  override def hasBeenCompleted(): Boolean = {
+  override def hasBeenCompleted: Boolean = {
     remainingQueries.isEmpty
   }
 
-  override protected def getRepairSeedUnchecked(): RepairSeed = {
+  override protected def getRepairSeedUnchecked: RepairSeed = {
     val seedAxioms = atomicClassAssertions.filter(axiom => (configuration.ontologyReasoner entails axiom) && !(templateReasoner entails axiom))
     RepairSeed(false, seedAxioms)
   }

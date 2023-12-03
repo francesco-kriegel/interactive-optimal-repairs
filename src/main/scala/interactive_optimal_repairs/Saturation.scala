@@ -1,8 +1,7 @@
 package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
-import interactive_optimal_repairs.IQSaturationNode.toShortDLString
-import interactive_optimal_repairs.Util.{ImplicitOWLClassExpression, ImplicitOWLIndividual, ImplicitOWLObjectPropertyExpression}
+import interactive_optimal_repairs.Util.{ImplicitOWLClassExpression, ImplicitOWLIndividual}
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
@@ -94,16 +93,11 @@ trait Saturation[N >: OWLIndividual](using configuration: RepairConfiguration) {
 
 type IQSaturationNode = OWLIndividual | OWLClassExpression
 
-object IQSaturationNode {
-
-  extension (node: IQSaturationNode) {
-    def toShortDLString(): String = {
-      node match
-        case individual: OWLIndividual => individual.toShortDLString
-        case classExpression: OWLClassExpression => classExpression.toShortDLString
-    }
-  }
-
+implicit class ImplicitIQSaturationNode(node: IQSaturationNode) {
+  lazy val toShortDLString: String =
+    node match
+      case individual: OWLIndividual => ImplicitOWLIndividual(individual).toShortDLString
+      case classExpression: OWLClassExpression => ImplicitOWLClassExpression(classExpression).toShortDLString
 }
 
 class IQSaturation(using configuration: RepairConfiguration) extends Saturation[IQSaturationNode] {
@@ -153,24 +147,27 @@ class IQSaturation(using configuration: RepairConfiguration) extends Saturation[
   }
 
   override def Succ(repairType: RepairType, property: OWLObjectProperty, target: IQSaturationNode): collection.Set[OWLClassExpression] = {
-    val succ = repairType.atoms.collect {
-      //      case ObjectSomeValuesFrom(qroperty, nominal@Nominal(uarget)) => if (property equals qroperty) && (target equals uarget) then nominal
-      //      case ObjectSomeValuesFrom(qroperty, filler) => if (property equals qroperty) && (target hasType filler) then filler
-      //      case ObjectHasValue(qroperty, uarget@NamedIndividual(_)) => if (property equals qroperty) && (target equals uarget) then Nominal(uarget)
+//    val succ = repairType.atoms.collect {
+//      //      case ObjectSomeValuesFrom(qroperty, nominal@Nominal(uarget)) => if (property equals qroperty) && (target equals uarget) then nominal
+//      //      case ObjectSomeValuesFrom(qroperty, filler) => if (property equals qroperty) && (target hasType filler) then filler
+//      //      case ObjectHasValue(qroperty, uarget@NamedIndividual(_)) => if (property equals qroperty) && (target equals uarget) then Nominal(uarget)
+//      case ObjectSomeValuesFrom(qroperty, filler) if (property equals qroperty) && (target hasType filler) => filler
+//    }
+//    val types =
+//      target match
+//        case individual: OWLIndividual => Set.from(configuration.ontologyReasoner.types(individual))
+//        case classExpression: OWLClassExpression => Set.from(configuration.ontologyReasoner.subsumers(classExpression))
+//    if !(succ subsetOf types) then
+//      Console.err.println("Repair type: " + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}"))
+//      Console.err.println("Property: " + property.toShortDLString)
+//      Console.err.println("Target node: " + target.toShortDLString)
+//      Console.err.println("Computed Succ: " + succ.map(_.toShortDLString).mkString("{", ",", "}"))
+//      Console.err.println("Types: " + types.map(_.toShortDLString).mkString("{", ",", "}"))
+//      throw RuntimeException() // sanity check, could be removed
+//    succ
+    repairType.atoms.collect {
       case ObjectSomeValuesFrom(qroperty, filler) if (property equals qroperty) && (target hasType filler) => filler
     }
-    val types =
-      target match
-        case individual: OWLIndividual => Set.from(configuration.ontologyReasoner.types(individual))
-        case classExpression: OWLClassExpression => Set.from(configuration.ontologyReasoner.subsumers(classExpression))
-    if !(succ subsetOf types) then
-      Console.err.println("Repair type: " + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}"))
-      Console.err.println("Property: " + property.toShortDLString)
-      Console.err.println("Target node: " + target.toShortDLString())
-      Console.err.println("Computed Succ: " + succ.map(_.toShortDLString).mkString("{", ",", "}"))
-      Console.err.println("Types: " + types.map(_.toShortDLString).mkString("{", ",", "}"))
-      throw RuntimeException() // sanity check, could be removed
-    succ
   }
 
 }

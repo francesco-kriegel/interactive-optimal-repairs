@@ -2,7 +2,7 @@ package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
 import interactive_optimal_repairs.CompatibilityMode.*
-import interactive_optimal_repairs.IQSaturationNode.toShortDLString
+import interactive_optimal_repairs.ImplicitIQSaturationNode
 import interactive_optimal_repairs.QueryLanguage.*
 import interactive_optimal_repairs.Util.{ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, Nominal}
 
@@ -43,7 +43,7 @@ trait Repair(val seed: RepairSeed, saturated: Boolean = true)(using configuratio
             && !(classExpression isCoveredBy seed(individual) wrt configuration.ontologyReasoner)
         case roleAssertion @ ObjectPropertyAssertion(_, property @ ObjectProperty(_), subject @ NamedIndividual(_), target @ NamedIndividual(_)) =>
           (configuration.ontology containsAxiom roleAssertion)
-            && !(configuration.request.axioms contains roleAssertion)
+            && !(configuration.request.negativeAxioms contains roleAssertion)
             && (saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner)
         case _ => ???
     else
@@ -95,7 +95,7 @@ class IQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration:
 class IRQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
   extends IQRepair({
     val newAxioms = mutable.HashSet.from[OWLClassAssertionAxiom](seed.axioms)
-    configuration.request.axioms foreach {
+    configuration.request.negativeAxioms foreach {
       case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
         // newAxioms += (subject Type (property some Nominal(target))) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
         val nominal = Nominal(target)
@@ -124,15 +124,15 @@ object CopiedOWLIndividual {
       lookupTableIQ.contains((objectInTheSaturation, repairType))
     }
 
-    def getCopyOrElseCreateCopyWithNamedIndividual(individualInTheSaturation: OWLNamedIndividual, repairType: RepairType) = {
+    def getCopyOrElseCreateCopyWithNamedIndividual(individualInTheSaturation: OWLNamedIndividual, repairType: RepairType): CopiedOWLIndividual = {
       getOrElseCreateCopy(individualInTheSaturation, repairType, (_, _) => individualInTheSaturation)
     }
 
-    def getCopyOrElseCreateCopyWithAnonymousIndividual(objectInTheSaturation: IQSaturationNode, repairType: RepairType) = {
+    def getCopyOrElseCreateCopyWithAnonymousIndividual(objectInTheSaturation: IQSaturationNode, repairType: RepairType): CopiedOWLIndividual = {
       getOrElseCreateCopy(objectInTheSaturation, repairType, nextAnonymousIndividual)
     }
 
-    private def getOrElseCreateCopy(objectInTheSaturation: IQSaturationNode, repairType: RepairType, objectInTheRepair: (IQSaturationNode, RepairType) => OWLIndividual) = {
+    private def getOrElseCreateCopy(objectInTheSaturation: IQSaturationNode, repairType: RepairType, objectInTheRepair: (IQSaturationNode, RepairType) => OWLIndividual): CopiedOWLIndividual = {
       if !containsCopy(objectInTheSaturation, repairType) then
         lookupTableIQ((objectInTheSaturation, repairType)) = CopiedOWLIndividual(objectInTheSaturation, repairType, objectInTheRepair(objectInTheSaturation, repairType))
       lookupTableIQ((objectInTheSaturation, repairType))
@@ -146,7 +146,7 @@ object CopiedOWLIndividual {
           // NamedIndividual(NodeID.nextAnonymousIRI())
           NamedIndividual("repair:variable#" + NodeID.nextAnonymousIRI().substring(2))
         case EXPLICIT_NAMED_INDIVIDUALS =>
-          NamedIndividual("repair:variable#⟨" + objectInTheSaturation.toShortDLString() + "," + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}") + "⟩")
+          NamedIndividual("repair:variable#⟨" + objectInTheSaturation.toShortDLString + "," + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}") + "⟩")
     }
 
   }
@@ -184,11 +184,13 @@ final class CopiedOWLIndividual(val individualInTheSaturation: IQSaturationNode,
   /* The field 'individualInTheRepair' is intentionally not hashed. */
   override def hashCode: Int = java.util.Objects.hash(individualInTheSaturation, repairType)
 
+  override def toString: String = "⟪" + individualInTheSaturation + "," + repairType + "⟫"
+
 }
 
 final class CopiedOWLObjectPropertyAssertionAxiom(val subject: CopiedOWLIndividual, val property: OWLObjectProperty, val target: CopiedOWLIndividual) {
 
-  lazy val toAxiomInTheRepair = subject.individualInTheRepair Fact (property, target.individualInTheRepair)
+  lazy val toAxiomInTheRepair: OWLObjectPropertyAssertionAxiom = subject.individualInTheRepair Fact (property, target.individualInTheRepair)
 
   override def equals(that: Any): Boolean = {
     that match

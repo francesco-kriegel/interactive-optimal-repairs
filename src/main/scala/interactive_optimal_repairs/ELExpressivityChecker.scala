@@ -17,29 +17,29 @@ import scala.jdk.StreamConverters.*
 object ELExpressivityChecker {
 
   def check(ontology: OWLOntology): Boolean = {
-    ontology.axioms(Imports.INCLUDED).toScala(LazyList).foldLeft(true)(_ && checkAxiom(_))
+    ontology.axioms(Imports.INCLUDED).toScala(LazyList).forall(checkAxiom)
   }
 
   def checkAxiom(axiom: OWLAxiom): Boolean = {
     axiom match
       case Declaration(annotations, entity) =>
-        annotations.foldLeft(true)(_ && checkAnnotation(_))
+        annotations.forall(checkAnnotation)
       case SubClassOf(annotations, subClass, superClass) =>
-        annotations.foldLeft(true)(_ && checkAnnotation(_))
+        annotations.forall(checkAnnotation)
           && checkClassExpression(subClass)
           && checkClassExpression(superClass)
       case EquivalentClasses(annotations, operands) =>
-        annotations.foldLeft(true)(_ && checkAnnotation(_))
-          && operands.foldLeft(true)(_ && checkClassExpression(_))
+        annotations.forall(checkAnnotation)
+          && operands.forall(checkClassExpression)
       case ObjectPropertyDomain(annotations, property, filler) =>
-        annotations.foldLeft(true)(_ && checkAnnotation(_))
+        annotations.forall(checkAnnotation)
           && checkObjectPropertyExpression(property)
           && checkClassExpression(filler)
       case ClassAssertion(annotations, classExpression, individual) =>
-        annotations.foldLeft(true)(_ && checkAnnotation(_))
+        annotations.forall(checkAnnotation)
           && checkClassExpression(classExpression)
       case ObjectPropertyAssertion(annotations, property, subject, target) =>
-        annotations.foldLeft(true)(_ && checkAnnotation(_))
+        annotations.forall(checkAnnotation)
           && checkObjectPropertyExpression(property)
       case _: OWLAnnotationAxiom =>
         true
@@ -52,7 +52,7 @@ object ELExpressivityChecker {
       case c @ Class(_) =>
         !(c equals OWLNothing)
       case ObjectIntersectionOf(operands) =>
-        operands.foldLeft(true)(_ && checkClassExpression(_))
+        operands.forall(checkClassExpression)
       case ObjectSomeValuesFrom(property, filler) =>
         checkObjectPropertyExpression(property)
           && checkClassExpression(filler)

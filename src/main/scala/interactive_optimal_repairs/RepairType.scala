@@ -61,7 +61,7 @@ class RepairType(val node: IQSaturationNode, val atoms: Set[OWLClassExpression])
     var result = 0
     if !(atoms subsetOf types) then result += 1 << 0
     if !atoms.forall(_.isAtom) then result += 1 << 1
-    if !atoms.forall(c => !atoms.exists(d => (c ne d) && (c isSubsumedBy d wrt configuration.trivialReasoner))) then result += 1 << 2
+    if atoms.exists(c => atoms.exists(d => (c ne d) && (c isSubsumedBy d wrt configuration.trivialReasoner))) then result += 1 << 2
     if !atoms.forall(premises(node, _) isCoveredBy atoms wrt configuration.trivialReasoner) then result += 1 << 3
     if !(classExpressionsToBeCovered isCoveredBy atoms wrt configuration.trivialReasoner) then result += 1 << 4
     if atoms.exists(classExpressionsToBeCovered isCoveredBy lowering(_) wrt configuration.trivialReasoner) then result += 1 << 5
@@ -143,7 +143,7 @@ object RepairType {
       Console.err.println("To be covered: " + classExpressionsToBeCovered)
       Console.err.println("Types: " + types)
       throw IllegalArgumentException() // sanity check, could be removed
-    val filteredClassExpressionsToBeCovered = classExpressionsToBeCovered.filter(types.contains)
+    val filteredClassExpressionsToBeCovered = classExpressionsToBeCovered intersect types
     var preTypes = mutable.HashSet(
       filteredClassExpressionsToBeCovered ++ filteredClassExpressionsToBeCovered.flatMap(premises(node, _)))
     val minTypes = mutable.HashSet[collection.Set[OWLClassExpression]]()
@@ -156,7 +156,7 @@ object RepairType {
           tlc.map(atom =>
               preType ++ Set(atom) ++ premises(node, atom))
             .filter(nextPreType =>
-              !tlc.exists(btom => (atoms(preType ++ Set(btom) ++ premises(node, btom)) isStrictlyCoveredBy atoms(nextPreType) wrt configuration.trivialReasoner)))
+              !tlc.exists(btom => atoms(preType ++ Set(btom) ++ premises(node, btom)) isStrictlyCoveredBy atoms(nextPreType) wrt configuration.trivialReasoner))
             .foreach(nextPreType =>
               nextPreTypes.add(nextPreType))
         else

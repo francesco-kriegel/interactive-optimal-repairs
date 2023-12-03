@@ -17,19 +17,19 @@ protected class RepairConfiguration(val ontology: OWLOntology,
     this(ontology, request, ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology, Set.empty, true))
   }
 
-  println("Initializing repair configuration with " + ontology.getAxioms(Imports.INCLUDED).size() + " axioms in the ontology and " + request.axioms.size + " queries in the repair request ...")
+//  println("Initializing repair configuration with " + ontology.getAxioms(Imports.INCLUDED).size() + " axioms in the ontology and " + request.negativeAxioms.size + " queries in the repair request ...")
 
-  private val _subClassExpressions: collection.Set[OWLClassExpression] =
+  private val _subClassExpressions =
     ontology.getNestedClassExpressions.asScala union
-      request.axioms.flatMap(_.getNestedClassExpressions.asScala)
+      request.negativeAxioms.flatMap(_.getNestedClassExpressions.asScala)
 
-  val subClassExpressions =
+  val subClassExpressions: collection.Set[OWLClassExpression] =
     _subClassExpressions union
       _subClassExpressions.collect { case ObjectSomeValuesFrom(property, filler) if !(filler equals OWLThing) => property some OWLThing }
 
-  println("There are " + subClassExpressions.size + " subclass expressions.")
+//  println("There are " + subClassExpressions.size + " subclass expressions.")
 
-  val conceptInclusions =
+  val conceptInclusions: mutable.Set[OWLSubClassOfAxiom] =
     ontology.getTBoxAxioms(Imports.INCLUDED).asScala.flatMap {
       case axiom@SubClassOf(_, _, _) => Iterable.single(axiom)
       case _@EquivalentClasses(_, operands) if operands.size > 1 =>
@@ -46,19 +46,19 @@ protected class RepairConfiguration(val ontology: OWLOntology,
       case _ => Iterable.empty
     }
 
-  val conceptInclusionsMap = mutable.HashMap[OWLClassExpression, mutable.HashSet[OWLClassExpression]]()
+  val conceptInclusionsMap: mutable.HashMap[OWLClassExpression, mutable.HashSet[OWLClassExpression]] = mutable.HashMap[OWLClassExpression, mutable.HashSet[OWLClassExpression]]()
   conceptInclusions foreach {
     case SubClassOf(_, premise, conclusion) =>
       conceptInclusionsMap.getOrElseUpdate(premise, { mutable.HashSet[OWLClassExpression]() }).add(conclusion)
   }
-  
-  val trivialReasoner = ExtendedClassification(Set.empty, subClassExpressions, true)
+
+  val trivialReasoner: ExtendedClassification = ExtendedClassification(Set.empty, subClassExpressions, true)
 //  // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
 //  val ontologyReasoner = ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology, subClassExpressions, true)
   ontologyReasoner.addClassExpressions(subClassExpressions)
   ontologyReasoner.precomputeInferences()
 
-  lazy val iqSaturation = { given configuration: RepairConfiguration = this; IQSaturation() }
+  lazy val iqSaturation: IQSaturation = { given configuration: RepairConfiguration = this; IQSaturation() }
 
   def dispose(): Unit = {
     trivialReasoner.dispose()

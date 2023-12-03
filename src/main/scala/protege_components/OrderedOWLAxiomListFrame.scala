@@ -9,7 +9,7 @@ import java.util
 import java.util.Set
 
 private class OrderedOWLAxiomListFrame[Ax <: OWLAxiom](using owlEditorKit: OWLEditorKit)
-  extends AbstractOWLFrame[java.util.Set[Ax]](owlEditorKit.getModelManager().getOWLOntologyManager()) {
+  extends AbstractOWLFrame[java.util.Set[Ax]](owlEditorKit.getModelManager.getOWLOntologyManager) {
 
   def addSection(section: OrderedOWLAxiomListFrameSection[Ax]): Unit = super.addSection(section)
 
