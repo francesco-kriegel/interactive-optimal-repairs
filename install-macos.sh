@@ -8,7 +8,7 @@ rm graalvm-jdk-21_macos-x64_bin.tar.gz
 mv graalvm-jdk-21.0.1+12.1/Contents/Home Protege-5.6.3/jre
 rm -rf graalvm-jdk-21.0.1+12.1
 
-curl -L https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.0/interactive-optimal-repairs-0.1.0.jar --output Protege-5.6.3/plugins/interactive-optimal-repairs-0.1.0.jar
+curl -L https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.2/interactive-optimal-repairs-0.1.2.jar --output Protege-5.6.3/plugins/interactive-optimal-repairs-0.1.2.jar
 
 sed -i '' "s/#max_heap_size=8G/max_heap_size=16G/g" Protege-5.6.3/conf/jvm.conf
 
