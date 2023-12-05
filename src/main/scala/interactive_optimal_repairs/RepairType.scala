@@ -5,7 +5,7 @@ import interactive_optimal_repairs.RepairType.premises
 import interactive_optimal_repairs.Util.{CoverageReasonerRequest, ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, maximalElements, minimalElements}
 
 import org.phenoscape.scowl.*
-import org.semanticweb.owlapi.model.{OWLClassExpression, OWLIndividual}
+import org.semanticweb.owlapi.model.OWLClassExpression
 
 import scala.collection
 import scala.collection.{immutable, mutable}
@@ -16,24 +16,24 @@ class RepairType(val node: IQSaturationNode, val atoms: Set[OWLClassExpression])
 
   private lazy val types =
     node match
-      case individual: OWLIndividual => Set.from(configuration.ontologyReasoner.types(individual))
-      case classExpression: OWLClassExpression => Set.from(configuration.ontologyReasoner.subsumers(classExpression))
+      case KernelObject(individual) => Set.from(configuration.classificationOfInputOntology.types(individual))
+      case ShellObject(classExpression) => Set.from(configuration.classificationOfInputOntology.subsumers(classExpression))
 
   lazy val isRepairType: Boolean = {
     (atoms subsetOf types)
       && atoms.forall(_.isAtom)
-      && atoms.forall(c => !atoms.exists(d => (c ne d) && (c isSubsumedBy d wrt configuration.trivialReasoner)))
-      && atoms.forall(premises(node, _) isCoveredBy atoms wrt configuration.trivialReasoner)
+      && atoms.forall(c => !atoms.exists(d => (c ne d) && (c isSubsumedBy d wrt configuration.classificationOfEmptyOntology)))
+      && atoms.forall(premises(node, _) isCoveredBy atoms wrt configuration.classificationOfEmptyOntology)
   }
 
   private def lowering(atomsToBeNotCovered: collection.Set[OWLClassExpression]): Set[OWLClassExpression] = {
-    if !(atomsToBeNotCovered isCoveredBy atoms wrt configuration.trivialReasoner) then throw IllegalArgumentException() // this could also be returned
+    if !(atomsToBeNotCovered isCoveredBy atoms wrt configuration.classificationOfEmptyOntology) then throw IllegalArgumentException() // this could also be returned
     maximalElements(
       types
         .filter(c => c.isAtom
-          && atoms.exists(c isSubsumedBy _ wrt configuration.trivialReasoner)
-          && !atomsToBeNotCovered.exists(_ isSubsumedBy c wrt configuration.trivialReasoner)),
-      configuration.trivialReasoner.lteq)
+          && atoms.exists(c isSubsumedBy _ wrt configuration.classificationOfEmptyOntology)
+          && !atomsToBeNotCovered.exists(_ isSubsumedBy c wrt configuration.classificationOfEmptyOntology)),
+      configuration.classificationOfEmptyOntology.lteq)
   }
 
   def lowering(atom: OWLClassExpression): RepairType = {
@@ -43,7 +43,7 @@ class RepairType(val node: IQSaturationNode, val atoms: Set[OWLClassExpression])
     var notDone = true
     while (notDone) {
       val newAtomsToBeNotCovered =
-        low.filterNot(premises(node, _) isCoveredBy low wrt configuration.trivialReasoner)
+        low.filterNot(premises(node, _) isCoveredBy low wrt configuration.classificationOfEmptyOntology)
       atomsToBeNotCovered.addAll(newAtomsToBeNotCovered)
       low = lowering(atomsToBeNotCovered)
       notDone = newAtomsToBeNotCovered.nonEmpty
@@ -53,18 +53,18 @@ class RepairType(val node: IQSaturationNode, val atoms: Set[OWLClassExpression])
 
   def isMinimalRepairTypeCovering(classExpressionsToBeCovered: collection.Set[OWLClassExpression]): Boolean = {
     isRepairType
-      && (classExpressionsToBeCovered isCoveredBy atoms wrt configuration.trivialReasoner)
-      && !atoms.exists(classExpressionsToBeCovered isCoveredBy lowering(_) wrt configuration.trivialReasoner)
+      && (classExpressionsToBeCovered isCoveredBy atoms wrt configuration.classificationOfEmptyOntology)
+      && !atoms.exists(classExpressionsToBeCovered isCoveredBy lowering(_) wrt configuration.classificationOfEmptyOntology)
   }
 
   def errorCode(classExpressionsToBeCovered: collection.Set[OWLClassExpression]): Int = {
     var result = 0
     if !(atoms subsetOf types) then result += 1 << 0
     if !atoms.forall(_.isAtom) then result += 1 << 1
-    if atoms.exists(c => atoms.exists(d => (c ne d) && (c isSubsumedBy d wrt configuration.trivialReasoner))) then result += 1 << 2
-    if !atoms.forall(premises(node, _) isCoveredBy atoms wrt configuration.trivialReasoner) then result += 1 << 3
-    if !(classExpressionsToBeCovered isCoveredBy atoms wrt configuration.trivialReasoner) then result += 1 << 4
-    if atoms.exists(classExpressionsToBeCovered isCoveredBy lowering(_) wrt configuration.trivialReasoner) then result += 1 << 5
+    if atoms.exists(c => atoms.exists(d => (c ne d) && (c isSubsumedBy d wrt configuration.classificationOfEmptyOntology))) then result += 1 << 2
+    if !atoms.forall(premises(node, _) isCoveredBy atoms wrt configuration.classificationOfEmptyOntology) then result += 1 << 3
+    if !(classExpressionsToBeCovered isCoveredBy atoms wrt configuration.classificationOfEmptyOntology) then result += 1 << 4
+    if atoms.exists(classExpressionsToBeCovered isCoveredBy lowering(_) wrt configuration.classificationOfEmptyOntology) then result += 1 << 5
     result
   }
 
@@ -96,17 +96,17 @@ object RepairType {
     classExpressions.filter(_.isAtom)
 
   private def uncoveredConjunctions(classExpressions: collection.Set[OWLClassExpression])(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
-    classExpressions.filter(c => !c.isAtom && !atoms(classExpressions).exists(c isSubsumedBy _ wrt configuration.trivialReasoner))
+    classExpressions.filter(c => !c.isAtom && !atoms(classExpressions).exists(c isSubsumedBy _ wrt configuration.classificationOfEmptyOntology))
 //    classExpressions.filter(c => !classExpressions.exists(c isSubsumedBy _ wrt configuration.trivialReasoner))
   }
 
   def premises(node: IQSaturationNode, atom: OWLClassExpression)(using configuration: RepairConfiguration): collection.Set[OWLClassExpression] = {
-    val isSubsumedByAtom = configuration.ontologyReasoner.subsumees(atom).toSet
+    val isSubsumedByAtom = configuration.classificationOfInputOntology.subsumees(atom).toSet
     node match
-      case individual: OWLIndividual =>
-        configuration.ontologyReasoner.types(individual).filter({ configuration.conceptInclusionsMap.getOrElse(_, Set.empty) exists isSubsumedByAtom }).toSet
-      case classExpression: OWLClassExpression =>
-        configuration.ontologyReasoner.subsumers(classExpression).filter({ configuration.conceptInclusionsMap.getOrElse(_, Set.empty) exists isSubsumedByAtom }).toSet
+      case KernelObject(individual) =>
+        configuration.classificationOfInputOntology.types(individual).filter({ configuration.conceptInclusionsMap.getOrElse(_, Set.empty) exists isSubsumedByAtom }).toSet
+      case ShellObject(classExpression) =>
+        configuration.classificationOfInputOntology.subsumers(classExpression).filter({ configuration.conceptInclusionsMap.getOrElse(_, Set.empty) exists isSubsumedByAtom }).toSet
   }
 
 //  @Deprecated // Does not always return a minimal repair type!
@@ -136,8 +136,8 @@ object RepairType {
   def computeAllMinimalRepairTypes(node: IQSaturationNode, classExpressionsToBeCovered: collection.Set[OWLClassExpression])(using configuration: RepairConfiguration): collection.Set[RepairType] = {
     val types =
       node match
-        case individual: OWLIndividual => Set.from(configuration.ontologyReasoner.types(individual))
-        case classExpression: OWLClassExpression => Set.from(configuration.ontologyReasoner.subsumers(classExpression))
+        case KernelObject(individual) => Set.from(configuration.classificationOfInputOntology.types(individual))
+        case ShellObject(classExpression) => Set.from(configuration.classificationOfInputOntology.subsumers(classExpression))
     if !(classExpressionsToBeCovered subsetOf types) then
       Console.err.println("Individual: " + node)
       Console.err.println("To be covered: " + classExpressionsToBeCovered)
@@ -156,13 +156,13 @@ object RepairType {
           tlc.map(atom =>
               preType ++ Set(atom) ++ premises(node, atom))
             .filter(nextPreType =>
-              !tlc.exists(btom => atoms(preType ++ Set(btom) ++ premises(node, btom)) isStrictlyCoveredBy atoms(nextPreType) wrt configuration.trivialReasoner))
+              !tlc.exists(btom => atoms(preType ++ Set(btom) ++ premises(node, btom)) isStrictlyCoveredBy atoms(nextPreType) wrt configuration.classificationOfEmptyOntology))
             .foreach(nextPreType =>
               nextPreTypes.add(nextPreType))
         else
-          minTypes.add(maximalElements(atoms(preType), _ isSubsumedBy _ wrt configuration.trivialReasoner))
+          minTypes.add(maximalElements(atoms(preType), _ isSubsumedBy _ wrt configuration.classificationOfEmptyOntology))
       preTypes = nextPreTypes.filterNot(_ contains OWLThing)
-    minimalElements(minTypes, _ isCoveredBy _ wrt configuration.trivialReasoner).map(mintype => RepairType(node, collection.immutable.Set.from(mintype)))
+    minimalElements(minTypes, _ isCoveredBy _ wrt configuration.classificationOfEmptyOntology).map(mintype => RepairType(node, collection.immutable.Set.from(mintype)))
   }
 
 }

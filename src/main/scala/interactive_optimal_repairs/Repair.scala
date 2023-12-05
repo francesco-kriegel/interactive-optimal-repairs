@@ -2,9 +2,8 @@ package de.tu_dresden.inf.lat
 package interactive_optimal_repairs
 
 import interactive_optimal_repairs.CompatibilityMode.*
-import interactive_optimal_repairs.ImplicitIQSaturationNode
 import interactive_optimal_repairs.QueryLanguage.*
-import interactive_optimal_repairs.Util.{ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, Nominal}
+import interactive_optimal_repairs.Util.{ImplicitBoolean, ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, Nominal}
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
@@ -12,6 +11,7 @@ import org.semanticweb.owlapi.model.parameters.Imports
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
+import scala.reflect.ClassTag
 
 enum CompatibilityMode(val description: String) {
   case NO extends CompatibilityMode("Use anonymous individuals (default mode)")
@@ -23,122 +23,66 @@ object Repair {
 
   def apply(queryLanguage: QueryLanguage, seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager): Repair = {
     queryLanguage match
-      case IQ => IQRepair(seed)
-      case IRQ => IRQRepair(seed)
-      case CQ => CQRepair(seed)
+      case IQ => IQRepair(seed, saturated)
+      case IRQ => IRQRepair(seed, saturated)
+      case CQ => CQRepair(seed, saturated)
   }
 
 }
 
-trait Repair(val seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration) {
+trait Repair(protected val seed: RepairSeed, protected val saturated: Boolean = true)(using configuration: RepairConfiguration) {
 
-//  private lazy val saturation = if saturated then IQSaturation() else ???
-  private lazy val saturation = if saturated then configuration.iqSaturation else ???
+  protected lazy val iqSaturation: IQSaturation | NoIQSaturation = if saturated then configuration.iqSaturation else NoIQSaturation()
+  lazy val isFinite: Boolean
 
   def entails(query: Query): Boolean = {
     if saturated then
       query match
         case classAssertion @ ClassAssertion(_, classExpression, individual @ NamedIndividual(_)) if ELExpressivityChecker.checkClassExpression(classExpression) =>
-          (configuration.ontologyReasoner entails classAssertion)
-            && !(classExpression isCoveredBy seed(individual) wrt configuration.ontologyReasoner)
+          (configuration.classificationOfInputOntology entails classAssertion)
+            && !(classExpression isCoveredBy seed(individual) wrt configuration.classificationOfInputOntology)
         case roleAssertion @ ObjectPropertyAssertion(_, property @ ObjectProperty(_), subject @ NamedIndividual(_), target @ NamedIndividual(_)) =>
           (configuration.ontology containsAxiom roleAssertion)
             && !(configuration.request.negativeAxioms contains roleAssertion)
-            && (saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner)
+            && (iqSaturation.Succ(seed(subject), property, KernelObject(target)) isCoveredBy seed(target) wrt configuration.classificationOfEmptyOntology)
         case _ => ???
     else
       ???
   }
 
-  def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology
+  def compute(compatibilityMode: CompatibilityMode = NO, depth: Option[Int] = None): OWLOntology
 
 }
 
-class IQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends Repair(seed, saturated) {
+private class IQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
+  extends Repair(iqSeed, saturated) {
 
-  override def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology = {
-//    val saturation = if saturated then IQSaturation() else NoSaturation()
-    val saturation = if saturated then configuration.iqSaturation else NoSaturation()
+  lazy val isFinite: Boolean = true
+
+  override def compute(compatibilityMode: CompatibilityMode = NO, depth: Option[Int] = None): OWLOntology = {
     val repair = ontologyManager.createOntology()
     ontologyManager.addAxioms(repair, configuration.ontology.getTBoxAxioms(Imports.INCLUDED))
-    val factory = CopiedOWLIndividual.FactoryIQ(compatibilityMode)
-    val queue = mutable.Queue[CopiedOWLIndividual]()
-    configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala foreach {
-      case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
-        if saturation.Succ(seed(subject), property, target) isCoveredBy seed(target) wrt configuration.trivialReasoner then
-          ontologyManager.addAxiom(repair, subject Fact (property, target))
-      case _ => // Do nothing.
-    }
-    configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
-      .map(individual => factory.getCopyOrElseCreateCopyWithNamedIndividual(individual, seed.getRepairType(individual)))
-      .foreach(queue.enqueue)
-    while queue.nonEmpty do
-      val subject = queue.dequeue()
-      saturation.getLabels(subject.individualInTheSaturation)
-        .filterNot(subject.repairType.atoms.contains)
-        .map(subject.individualInTheRepair Type _)
-        .foreach(ontologyManager.addAxiom(repair, _))
-      saturation.getSuccessors(subject.individualInTheSaturation)
-        .foreach { (property, targetInTheSaturation) =>
-          RepairType.computeAllMinimalRepairTypes(targetInTheSaturation, saturation.Succ(subject.repairType, property, targetInTheSaturation))
-            .foreach { repairType =>
-              val targetAlreadyExists = factory.containsCopy(targetInTheSaturation, repairType)
-              val target = factory.getCopyOrElseCreateCopyWithAnonymousIndividual(targetInTheSaturation, repairType)
-              ontologyManager.addAxiom(repair, subject.individualInTheRepair Fact (property, target.individualInTheRepair))
-              if !targetAlreadyExists then queue.enqueue(target)
-            }
-        }
-    repair
-  }
-}
 
-class IRQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
-  extends IQRepair({
-    val newAxioms = mutable.HashSet.from[OWLClassAssertionAxiom](seed.axioms)
-    configuration.request.negativeAxioms foreach {
-      case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
-        // newAxioms += (subject Type (property some Nominal(target))) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-        val nominal = Nominal(target)
-        val successor = property some nominal
-        newAxioms += (subject Type successor) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-        configuration.trivialReasoner.addClassExpression(nominal)
-        configuration.trivialReasoner.addClassExpression(successor)
-        configuration.ontologyReasoner.addClassExpression(nominal)
-        configuration.ontologyReasoner.addClassExpression(successor)
-      case _ => // Do nothing.
-    }
-    RepairSeed(seed.preprocessed, newAxioms)
-  }, saturated) {}
-
-class CQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration) extends Repair(seed, saturated) {
-  override def compute(compatibilityMode: CompatibilityMode = NO): OWLOntology = ???
-}
-
-object CopiedOWLIndividual {
-
-  class FactoryIQ(compatibilityMode: CompatibilityMode) { //(using ontologyManager: OWLOntologyManager) {
-
-    private val lookupTableIQ = mutable.HashMap[(IQSaturationNode, RepairType), CopiedOWLIndividual]()
-
+    val lookupTableIQ = mutable.HashMap[(IQSaturationNode, RepairType), Copy[IQSaturationNode]]()
     def containsCopy(objectInTheSaturation: IQSaturationNode, repairType: RepairType): Boolean = {
       lookupTableIQ.contains((objectInTheSaturation, repairType))
     }
-
-    def getCopyOrElseCreateCopyWithNamedIndividual(individualInTheSaturation: OWLNamedIndividual, repairType: RepairType): CopiedOWLIndividual = {
-      getOrElseCreateCopy(individualInTheSaturation, repairType, (_, _) => individualInTheSaturation)
+    def getCopyOrElseCreateCopyWithNamedIndividual(individualInTheSaturation: OWLNamedIndividual, repairType: RepairType): Copy[IQSaturationNode] = {
+      getOrElseCreateCopy(KernelObject(individualInTheSaturation), repairType, (_, _) => individualInTheSaturation)
     }
-
-    def getCopyOrElseCreateCopyWithAnonymousIndividual(objectInTheSaturation: IQSaturationNode, repairType: RepairType): CopiedOWLIndividual = {
+    def getCopyOrElseCreateCopyWithAnonymousIndividual(objectInTheSaturation: IQSaturationNode, repairType: RepairType): Copy[IQSaturationNode] = {
       getOrElseCreateCopy(objectInTheSaturation, repairType, nextAnonymousIndividual)
     }
-
-    private def getOrElseCreateCopy(objectInTheSaturation: IQSaturationNode, repairType: RepairType, objectInTheRepair: (IQSaturationNode, RepairType) => OWLIndividual): CopiedOWLIndividual = {
-      if !containsCopy(objectInTheSaturation, repairType) then
-        lookupTableIQ((objectInTheSaturation, repairType)) = CopiedOWLIndividual(objectInTheSaturation, repairType, objectInTheRepair(objectInTheSaturation, repairType))
-      lookupTableIQ((objectInTheSaturation, repairType))
+    def getOrElseCreateCopy(objectInTheSaturation: IQSaturationNode, repairType: RepairType, objectInTheRepair: (IQSaturationNode, RepairType) => OWLIndividual): Copy[IQSaturationNode] = {
+      val maybeCopy = lookupTableIQ.get((objectInTheSaturation, repairType))
+      if maybeCopy.isDefined then
+        maybeCopy.get
+      else
+        val copy = Copy(objectInTheSaturation, repairType, objectInTheRepair(objectInTheSaturation, repairType))
+        lookupTableIQ((objectInTheSaturation, repairType)) = copy
+        copy
     }
-
-    private def nextAnonymousIndividual(objectInTheSaturation: IQSaturationNode, repairType: RepairType): OWLIndividual = {
+    def nextAnonymousIndividual(objectInTheSaturation: IQSaturationNode, repairType: RepairType): OWLIndividual = {
       compatibilityMode match
         case NO =>
           AnonymousIndividual()
@@ -146,55 +90,198 @@ object CopiedOWLIndividual {
           // NamedIndividual(NodeID.nextAnonymousIRI())
           NamedIndividual("repair:variable#" + NodeID.nextAnonymousIRI().substring(2))
         case EXPLICIT_NAMED_INDIVIDUALS =>
-          NamedIndividual("repair:variable#⟨" + objectInTheSaturation.toShortDLString + "," + repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}") + "⟩")
+          NamedIndividual("repair:variable#⟨" + objectInTheSaturation.toShortDLString + ", " + (if repairType.atoms.isEmpty then "∅" else repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}")) + "⟩")
     }
 
+    val queue = mutable.Queue[Copy[IQSaturationNode]]()
+    configuration.ontology.getABoxAxioms(Imports.INCLUDED).asScala foreach {
+      case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
+        if iqSaturation.Succ(seed(subject), property, KernelObject(target)) isCoveredBy seed(target) wrt configuration.classificationOfEmptyOntology then
+          ontologyManager.addAxiom(repair, subject Fact (property, target))
+      case _ => // Do nothing.
+    }
+    configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
+      .map(individual => getCopyOrElseCreateCopyWithNamedIndividual(individual, seed.getRepairType(individual)))
+      .foreach(queue.enqueue)
+    while queue.nonEmpty do
+      val subject = queue.dequeue()
+      iqSaturation.getLabels(subject.objectInTheSaturation)
+        .filterNot(subject.repairType.atoms.contains)
+        .map(subject.objectInTheRepair Type _)
+        .foreach(ontologyManager.addAxiom(repair, _))
+      iqSaturation.getSuccessors(subject.objectInTheSaturation)
+        .foreach { (property, targetInTheSaturation) =>
+          RepairType.computeAllMinimalRepairTypes(targetInTheSaturation, iqSaturation.Succ(subject.repairType, property, targetInTheSaturation))
+            .foreach { repairType =>
+              val targetAlreadyExists = containsCopy(targetInTheSaturation, repairType)
+              val target = getCopyOrElseCreateCopyWithAnonymousIndividual(targetInTheSaturation, repairType)
+              ontologyManager.addAxiom(repair, subject.objectInTheRepair Fact (property, target.objectInTheRepair))
+              if !targetAlreadyExists then queue.enqueue(target)
+            }
+        }
+    repair
   }
 
-//  final private class FactoryCQ private extends CopiedOWLIndividual.FactoryIQ {
-//    final private val lookupTableCQ = HashMultimap.create
-//
-//    override private def newNamedIndividual(individualInTheSaturation: OWLIndividual, repairType: Nothing) = {
-//      val copiedOWLIndividual = super.newNamedIndividual(individualInTheSaturation, repairType)
-//      lookupTableCQ.put(individualInTheSaturation, copiedOWLIndividual)
-//      copiedOWLIndividual
-//    }
-//
-//    override private def newAnonymousIndividual(individualInTheSaturation: OWLIndividual, repairType: Nothing) = {
-//      val copiedOWLIndividual = super.newAnonymousIndividual(individualInTheSaturation, repairType)
-//      lookupTableCQ.put(individualInTheSaturation, copiedOWLIndividual)
-//      copiedOWLIndividual
-//    }
-//
-//    private def getCopiesOf(individualInTheSaturation: OWLIndividual) = Collections.unmodifiableCollection(lookupTableCQ.get(individualInTheSaturation))
-//  }
 }
 
-final class CopiedOWLIndividual(val individualInTheSaturation: IQSaturationNode,  // t
-                                val repairType: RepairType,                       // 𝒦
-                                val individualInTheRepair: OWLIndividual) {       // y_{t,𝒦}
+private def extendRepairSeedWithTheUnwantedRoleAssertions(seed: RepairSeed)(using configuration: RepairConfiguration) = {
 
-  /* The field 'individualInTheRepair' is intentionally not compared. */
+  val newAxioms = mutable.HashSet.from[OWLClassAssertionAxiom](seed.axioms)
+  configuration.request.negativeAxioms foreach {
+    case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
+      // newAxioms += (subject Type (property some Nominal(target))) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
+      val nominal = Nominal(target)
+      val successor = property some nominal
+      newAxioms += (subject Type successor) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
+      configuration.classificationOfEmptyOntology.addClassExpression(nominal)
+      configuration.classificationOfEmptyOntology.addClassExpression(successor)
+      configuration.classificationOfInputOntology.addClassExpression(nominal)
+      configuration.classificationOfInputOntology.addClassExpression(successor)
+    case _ => // Do nothing.
+  }
+  RepairSeed(seed.preprocessed, newAxioms)
+
+}
+
+private class IRQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
+  extends IQRepair(extendRepairSeedWithTheUnwantedRoleAssertions(iqSeed), saturated) {}
+
+private class CQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
+  extends Repair(extendRepairSeedWithTheUnwantedRoleAssertions(iqSeed), saturated) {
+
+  private lazy val cqSaturation = if saturated then CQSaturation() else NoCQSaturation()
+  lazy val isFinite: Boolean = saturated implies configuration.iqSaturation.hasAcyclicShell
+
+  def compute(compatibilityMode: CompatibilityMode = NO, depth: Option[Int] = None): OWLOntology = {
+    val repair = ontologyManager.createOntology()
+    ontologyManager.addAxioms(repair, configuration.ontology.getTBoxAxioms(Imports.INCLUDED))
+
+    val lookupTableIQ = mutable.HashMap[(CQSaturationNode, RepairType), Copy[CQSaturationNode]]()
+    val lookupTableCQ = mutable.HashMap[CQSaturationNode, mutable.HashSet[Copy[CQSaturationNode]]]()
+
+    def containsCopy(objectInTheSaturation: CQSaturationNode, repairType: RepairType): Boolean = {
+      lookupTableIQ.contains((objectInTheSaturation, repairType))
+    }
+    def getCopyOrElseCreateCopyWithNamedIndividual(individualInTheSaturation: OWLNamedIndividual, repairType: RepairType): Copy[CQSaturationNode] = {
+      getOrElseCreateCopy(KernelObject(individualInTheSaturation), repairType, (_, _) => individualInTheSaturation)
+    }
+    def getCopyOrElseCreateCopyWithAnonymousIndividual(objectInTheSaturation: CQSaturationNode, repairType: RepairType): Copy[CQSaturationNode] = {
+      getOrElseCreateCopy(objectInTheSaturation, repairType, nextAnonymousIndividual)
+    }
+    def getOrElseCreateCopy(objectInTheSaturation: CQSaturationNode, repairType: RepairType, objectInTheRepair: (CQSaturationNode, RepairType) => OWLIndividual): Copy[CQSaturationNode] = {
+      val maybeCopy = lookupTableIQ.get((objectInTheSaturation, repairType))
+      if maybeCopy.isDefined then
+        maybeCopy.get
+      else
+        val copy = Copy(objectInTheSaturation, repairType, objectInTheRepair(objectInTheSaturation, repairType))
+        lookupTableIQ((objectInTheSaturation, repairType)) = copy
+        lookupTableCQ.getOrElseUpdate(objectInTheSaturation, { mutable.HashSet[Copy[CQSaturationNode]]() }) += copy
+        copy
+    }
+    def nextAnonymousIndividual(objectInTheSaturation: CQSaturationNode, repairType: RepairType): OWLIndividual = {
+      compatibilityMode match
+        case NO =>
+          AnonymousIndividual()
+        case FRESH_NAMED_INDIVIDUALS =>
+          // NamedIndividual(NodeID.nextAnonymousIRI())
+          NamedIndividual("repair:variable#" + NodeID.nextAnonymousIRI().substring(2))
+        case EXPLICIT_NAMED_INDIVIDUALS =>
+          NamedIndividual("repair:variable#⟨" + objectInTheSaturation.toShortDLString + ", " + (if repairType.atoms.isEmpty then "∅" else repairType.atoms.map(_.toShortDLString).mkString("{", ",", "}")) + "⟩")
+    }
+
+
+    val queue = mutable.Queue[AssertionCopy[CQSaturationNode]]()
+
+    def addNewCopyToTheRepair(copy: Copy[CQSaturationNode]): Unit = {
+      cqSaturation.getLabels(copy.objectInTheSaturation)
+        .filterNot(copy.repairType.atoms.contains)
+        .map(copy.objectInTheRepair Type _)
+        .foreach(ontologyManager.addAxiom(repair, _))
+      cqSaturation.getSuccessors(copy.objectInTheSaturation).foreach { case (property, target) =>
+        getCopiesOf(target).foreach { copyOfTarget =>
+          queue.enqueue(AssertionCopy[CQSaturationNode](copy, property, copyOfTarget))
+        }
+      }
+      cqSaturation.getPredecessors(copy.objectInTheSaturation).foreach { case (property, subject) =>
+        getCopiesOf(subject).foreach { copyOfSubject =>
+          if !(copy equals copyOfSubject) then
+            queue.enqueue(AssertionCopy[CQSaturationNode](copyOfSubject, property, copy))
+        }
+      }
+    }
+
+    configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala.foreach({ individual =>
+      addNewCopyToTheRepair(getCopyOrElseCreateCopyWithNamedIndividual(individual, seed(individual)))
+      if seed(individual).atoms.nonEmpty then
+        addNewCopyToTheRepair(getCopyOrElseCreateCopyWithAnonymousIndividual(KernelObject(individual), RepairType(KernelObject(individual), Set.empty)))
+    })
+    configuration.ontology.getAnonymousIndividuals.asScala.foreach({ individual =>
+      addNewCopyToTheRepair(getCopyOrElseCreateCopyWithAnonymousIndividual(KernelObject(individual), RepairType(KernelObject(individual), Set.empty)))
+    })
+
+    def getCopiesOf(objectInTheSaturation: CQSaturationNode): collection.Set[Copy[CQSaturationNode]] = {
+      //lookupTableCQ.getOrElse(objectInTheSaturation, Set.empty)
+      if depth.isDefined && objectInTheSaturation.depth > depth.get then
+        Set.empty
+      else
+        if !(lookupTableCQ contains objectInTheSaturation) then
+          addNewCopyToTheRepair(getCopyOrElseCreateCopyWithAnonymousIndividual(objectInTheSaturation, RepairType(objectInTheSaturation.toIQSaturationNode, Set.empty)))
+        lookupTableCQ(objectInTheSaturation)
+    }
+
+    while queue.nonEmpty do {
+      val assertionCopy = queue.dequeue()
+      val subject = assertionCopy.subject
+      val property = assertionCopy.property
+      val target = assertionCopy.target
+      if depth.isDefined implies target.objectInTheSaturation.depth <= depth.get then
+        val Succ = cqSaturation.Succ(subject.repairType, property, target.objectInTheSaturation)
+        if Succ isCoveredBy target.repairType wrt configuration.classificationOfEmptyOntology then
+          ontologyManager.addAxiom(repair, assertionCopy.toAxiomInTheRepair)
+        else
+          RepairType.computeAllMinimalRepairTypes(target.objectInTheSaturation.toIQSaturationNode, target.repairType.atoms union Succ)
+            .foreach { repairType =>
+              if !containsCopy(target.objectInTheSaturation, repairType) then
+                addNewCopyToTheRepair(getCopyOrElseCreateCopyWithAnonymousIndividual(target.objectInTheSaturation, repairType))
+            }
+    }
+
+    repair
+  }
+
+}
+
+private final class Copy[N : ClassTag](val objectInTheSaturation: N,          // t
+                                       val repairType: RepairType,            // 𝒦
+                                       val objectInTheRepair: OWLIndividual)  // ⟪t,𝒦⟫
+                                      (implicit classTag_Copy_N: ClassTag[Copy[N]]) {
+
+  /* The field 'objectInTheRepair' is intentionally not compared. */
   override def equals(that: Any): Boolean = {
     that match
-      case that: CopiedOWLIndividual => (this.individualInTheSaturation equals that.individualInTheSaturation) && (this.repairType equals that.repairType)
+//      case that: CopiedOWLIndividual[N]
+      case classTag_Copy_N(that) => (this.objectInTheSaturation equals that.objectInTheSaturation) && (this.repairType equals that.repairType)
       case _ => false
   }
 
-  /* The field 'individualInTheRepair' is intentionally not hashed. */
-  override def hashCode: Int = java.util.Objects.hash(individualInTheSaturation, repairType)
+  /* The field 'objectInTheRepair' is intentionally not hashed. */
+  override def hashCode: Int = java.util.Objects.hash(objectInTheSaturation, repairType)
 
-  override def toString: String = "⟪" + individualInTheSaturation + "," + repairType + "⟫"
+  override def toString: String = "⟪" + objectInTheSaturation + "," + repairType + "⟫"
 
 }
 
-final class CopiedOWLObjectPropertyAssertionAxiom(val subject: CopiedOWLIndividual, val property: OWLObjectProperty, val target: CopiedOWLIndividual) {
+private final class AssertionCopy[N : ClassTag](val subject: Copy[N],
+                                                val property: OWLObjectProperty,
+                                                val target: Copy[N])
+                                               (implicit classTag_AssertionCopy_N: ClassTag[AssertionCopy[N]]) {
 
-  lazy val toAxiomInTheRepair: OWLObjectPropertyAssertionAxiom = subject.individualInTheRepair Fact (property, target.individualInTheRepair)
+  lazy val toAxiomInTheRepair: OWLObjectPropertyAssertionAxiom = subject.objectInTheRepair Fact (property, target.objectInTheRepair)
 
   override def equals(that: Any): Boolean = {
     that match
-      case that: CopiedOWLObjectPropertyAssertionAxiom => (this.subject equals that.subject) && (this.property equals that.property) && (this.target equals that.target)
+//      case that: AssertionCopy[N] =>
+      case classTag_AssertionCopy_N(that) => (this.subject equals that.subject) && (this.property equals that.property) && (this.target equals that.target)
       case _ => false
   }
 

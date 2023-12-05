@@ -5,28 +5,24 @@ import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 import interactive_optimal_repairs.Util.ImplicitOWLClassExpression
 
 import org.phenoscape.scowl.*
-//import org.semanticweb.owlapi.model.parameters.Imports
-import org.semanticweb.owlapi.model.{OWLAxiom, OWLClassExpression, OWLObjectPropertyAssertionAxiom, OWLOntologyManager}
+import org.semanticweb.owlapi.model.{OWLAxiom, OWLObjectPropertyAssertionAxiom}
 
-//import scala.jdk.CollectionConverters.*
-import scala.jdk.StreamConverters.*
-
-trait ErrorTolerantReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) {
+trait ErrorTolerantReasoner(using configuration: RepairConfiguration) {
 
   def isBravelyEntailed(queries: collection.Set[Query]): Boolean = {
     // entailmentProbability(queries) > 0f
-    queries.forall(configuration.ontologyReasoner.entails) && {
-      val subClassExpressions: collection.Set[OWLClassExpression] =
-        queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
-          configuration.request.negativeAxioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
+    queries.forall(configuration.classificationOfInputOntology.entails) && {
+//      val subClassExpressions: collection.Set[OWLClassExpression] =
+//        queries.flatMap(_.nestedClassExpressions().toScala(LazyList)) concat
+//          configuration.request.negativeAxioms.flatMap(_.nestedClassExpressions().toScala(LazyList))
 //      // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
 //      val reasoner = ExtendedClassification(queries ++ configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala, subClassExpressions, true)
 //      val result = !configuration.request.axioms.exists(reasoner.entails)
 //      reasoner.dispose()
 //      result
-      val aboxIndex = configuration.ontologyReasoner.registerABox(queries.asInstanceOf[collection.Set[OWLAxiom]])
-      val result = !configuration.request.negativeAxioms.exists(configuration.ontologyReasoner.entails(aboxIndex, _))
-      configuration.ontologyReasoner.unregisterABox(aboxIndex)
+      val aboxIndex = configuration.classificationOfInputOntology.registerABox(queries.asInstanceOf[collection.Set[OWLAxiom]])
+      val result = !configuration.request.negativeAxioms.exists(configuration.classificationOfInputOntology.entails(aboxIndex, _))
+      configuration.classificationOfInputOntology.unregisterABox(aboxIndex)
       result
     }
   }
@@ -39,7 +35,7 @@ trait ErrorTolerantReasoner(using configuration: RepairConfiguration, ontologyMa
 
 }
 
-class ErrorTolerantIQReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends ErrorTolerantReasoner() {
+class ErrorTolerantIQReasoner(using configuration: RepairConfiguration) extends ErrorTolerantReasoner() {
 
   def entailmentProbability(queries: collection.Set[Query]): Float = {
     if queries.exists({
@@ -50,18 +46,18 @@ class ErrorTolerantIQReasoner(using configuration: RepairConfiguration, ontology
       throw IllegalArgumentException("The supplied query set contains a query not in IQ.")
     else
       if queries.forall {
-        case classAssertion@ClassAssertion(_, _, _) => configuration.ontologyReasoner entails classAssertion
+        case classAssertion@ClassAssertion(_, _, _) => configuration.classificationOfInputOntology entails classAssertion
         case _ => false
       } then
         val individuals = queries.collect { case ClassAssertion(_, _, individual) => individual.asOWLNamedIndividual() }
         individuals.map { individual =>
-          val minimalRepairTypes = RepairType.computeAllMinimalRepairTypes(individual, configuration.request.getNegativeClassExpressions(individual))
+          val minimalRepairTypes = RepairType.computeAllMinimalRepairTypes(KernelObject(individual), configuration.request.getNegativeClassExpressions(individual))
           val denominator = minimalRepairTypes.size
           val numerator = minimalRepairTypes.count { repairType =>
             queries.forall {
               case ClassAssertion(_, classExpression, jndividual)
                 if individual equals jndividual =>
-                  !(classExpression isCoveredBy repairType wrt configuration.ontologyReasoner)
+                  !(classExpression isCoveredBy repairType wrt configuration.classificationOfInputOntology)
               case _ => true
             }
           }
@@ -73,7 +69,7 @@ class ErrorTolerantIQReasoner(using configuration: RepairConfiguration, ontology
 
 }
 
-class ErrorTolerantIRQReasoner(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends ErrorTolerantReasoner() {
+class ErrorTolerantIRQReasoner(using configuration: RepairConfiguration) extends ErrorTolerantReasoner() {
 
   def entailmentProbability(queries: collection.Set[Query]): Float = {
     ???

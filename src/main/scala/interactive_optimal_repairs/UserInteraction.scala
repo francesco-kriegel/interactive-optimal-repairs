@@ -90,7 +90,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
             val implicitlyAnsweredQueries_Conjunction =
               pendingQueries_Conjunction.keySet filter {
                 case ClassAssertion(_, dlassExpression, jndividual) =>
-                  (individual eq jndividual) && (dlassExpression isSubsumedBy classExpression wrt configuration.trivialReasoner)
+                  (individual eq jndividual) && (dlassExpression isSubsumedBy classExpression wrt configuration.classificationOfEmptyOntology)
                 case _ => ???
               }
             val diff_Conjunction = pendingQueries_Conjunction.keySet diff implicitlyAnsweredQueries_Conjunction
@@ -100,7 +100,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
 
             val implicitlyAnsweredQueries_ExistentialRestriction =
               pendingQueries_ExistentialRestriction.keySet filter {
-                case (_, _, target, filler) => (individual equals target) && (filler isSubsumedBy classExpression wrt configuration.trivialReasoner)
+                case (_, _, target, filler) => (individual equals target) && (filler isSubsumedBy classExpression wrt configuration.classificationOfEmptyOntology)
               }
             val diff_ExistentialRestriction = pendingQueries_ExistentialRestriction.keySet diff implicitlyAnsweredQueries_ExistentialRestriction
             val subQueriesToBeRetained_ExistentialRestriction = pendingQueries_ExistentialRestriction.collect({ case (key, (roleAssertion, _)) if diff_ExistentialRestriction contains key => roleAssertion }).toSet[Query]
@@ -108,8 +108,8 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
             pendingQueries_ExistentialRestriction --= implicitlyAnsweredQueries_ExistentialRestriction
 
             ps ++=
-              premises(individual, classExpression) filterNot {
-                _ isCoveredBy repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner
+              premises(KernelObject(individual), classExpression) filterNot {
+                _ isCoveredBy repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.classificationOfEmptyOntology
               } map { individual Type _ }
             classExpression match
               case ObjectSomeValuesFrom(_, _) =>
@@ -137,7 +137,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
     undecidedQueries_Conjunction --= pendingQueries_Conjunction.keySet
     undecidedQueries_Conjunction.filterInPlace {
       case ClassAssertion(_, classExpression, individual) =>
-        !(classExpression isCoveredBy repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner)
+        !(classExpression isCoveredBy repairSeed.getOrElse(individual.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.classificationOfEmptyOntology)
       case _ => ???
     }
     undecidedQueries_Conjunction.foreach {
@@ -155,7 +155,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
             if (property equals qroperty)
               && (individual equals subject)
               && !(pendingQueries_ExistentialRestriction contains (individual, property, target, filler))
-              && !(filler isCoveredBy repairSeed.getOrElse(target.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.trivialReasoner) =>
+              && !(filler isCoveredBy repairSeed.getOrElse(target.asOWLNamedIndividual(), { mutable.HashSet.empty }) wrt configuration.classificationOfEmptyOntology) =>
             val classAssertion = target Type filler
             pendingQueries_ExistentialRestriction((individual, property, target, filler)) = (roleAssertion, classAssertion)
             userInterface.showQuestion(roleAssertion)
@@ -171,7 +171,7 @@ class FastUserInteraction()(using configuration: RepairConfiguration) extends Us
       case roleAssertion: OWLObjectPropertyAssertionAxiom => nonDeclinedRoleAssertions += roleAssertion
       case _ => // Do nothing.
     }
-    processDeclinedQueries(configuration.request.negativeAxioms.filter { configuration.ontologyReasoner.entails })
+    processDeclinedQueries(configuration.request.negativeAxioms.filter { configuration.classificationOfInputOntology.entails })
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
@@ -242,9 +242,9 @@ class Smart1UserInteraction()(using configuration: RepairConfiguration, ontology
         true)
 
     for {
-      individual <- configuration.ontologyReasoner.instances(OWLThing)
+      individual <- configuration.classificationOfInputOntology.instances(OWLThing)
       // classExpression <- minimalElements(configuration.ontologyReasoner.types(individual), _ isSubsumedBy _ wrt configuration.trivialReasoner)
-      classExpression <- configuration.ontologyReasoner.types(individual)
+      classExpression <- configuration.classificationOfInputOntology.types(individual)
     }
       val assertion = individual Type classExpression
       if (saturatedRepair entails assertion) && !(unsaturatedRepairReasoner entails assertion) then
@@ -308,7 +308,7 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 //      configuration.subClassExpressions,
 //      false
 //    )
-  private val acceptedQueriesABoxIndex = configuration.ontologyReasoner.registerABox(configuration.request.positiveAxioms.asInstanceOf[collection.Set[OWLAxiom]])
+  private val acceptedQueriesABoxIndex = configuration.classificationOfInputOntology.registerABox(configuration.request.positiveAxioms.asInstanceOf[collection.Set[OWLAxiom]])
 
   private def isUndecided(query: Query): Boolean = {
     !(acceptedQueries contains query) && !(declinedQueries contains query)
@@ -354,23 +354,23 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 //        false,
 //        true)
     ontologyManager.addAxioms(unsaturatedRepairComputed, acceptedQueries.asJava)
-    val unsaturatedRepairABoxIndex = configuration.ontologyReasoner.registerABox(unsaturatedRepairComputed, true)
+    val unsaturatedRepairABoxIndex = configuration.classificationOfInputOntology.registerABox(unsaturatedRepairComputed, true)
     for {
       individual <- configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
       // classExpression <- minimalElements(configuration.ontologyReasoner.types(individual), _ isSubsumedBy _ wrt configuration.trivialReasoner)
-      classExpression <- configuration.ontologyReasoner.types(individual).filter(_.isAtom)
+      classExpression <- configuration.classificationOfInputOntology.types(individual).filter(_.isAtom)
     }
       val query = individual Type classExpression
 //      if isUndecided(query) && (saturatedRepair entails query) && !(unsaturatedRepairReasoner entails query) then
-      if isUndecided(query) && (saturatedRepairVirtual entails query) && !configuration.ontologyReasoner.entails(unsaturatedRepairABoxIndex, query) then
+      if isUndecided(query) && (saturatedRepairVirtual entails query) && !configuration.classificationOfInputOntology.entails(unsaturatedRepairABoxIndex, query) then
         pendingQueries += query
         userInterface.showQuestion(query)
 //    unsaturatedRepairReasoner.dispose()
-    configuration.ontologyReasoner.unregisterABox(unsaturatedRepairABoxIndex)
+    configuration.classificationOfInputOntology.unregisterABox(unsaturatedRepairABoxIndex)
   }
 
   override def receiveAnswer(query: Query, answer: Answer): Unit = {
-    if answer equals ROLLBACK then
+    if answer equals ROLLBACK then // TODO: Implement rollback functionality.
       JOptionPane.showMessageDialog(null, "Rollback has not been implemented.", "Error", JOptionPane.ERROR_MESSAGE)
     else
       isCurrentlyProcessing.incrementAndGet()
@@ -389,7 +389,7 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
   private def processAcceptedQuery(query: Query, inheritedAccept: Boolean): Unit = {
     acceptedQueries += query
 //    acceptedQueriesReasoner.addAxiomAndFlush(query)
-    configuration.ontologyReasoner.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
+    configuration.classificationOfInputOntology.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
     if inheritedAccept then
       if inheritedAnswersMustBeConfirmed then
         inheritedAnswers(query) = INHERITED_ACCEPT
@@ -425,7 +425,7 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
             //  } map {
             //    individual Type _
             //  }
-            nextDeclinedQueries ++= premises(individual, classExpression) map { individual Type _ } diff processedQueries
+            nextDeclinedQueries ++= premises(KernelObject(individual), classExpression) map { individual Type _ } diff processedQueries
           else
             undecidedQueries_Conjunction += query
         case query@ObjectPropertyAssertion(_, _, _, _) =>
@@ -480,15 +480,15 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
     val nextDeclinedQueries = mutable.HashSet[Query]()
     (pendingQueries filterNot inheritedAnswers.keySet).foreach(query => {
 //      if acceptedQueriesReasoner entails query then
-      if configuration.ontologyReasoner.entails(acceptedQueriesABoxIndex, query) then
+      if configuration.classificationOfInputOntology.entails(acceptedQueriesABoxIndex, query) then
         processAcceptedQuery(query, true)
       else if {
 //        acceptedQueriesReasoner.addAxiomAndFlush(query)
 //        val inheritedDecline = declinedQueries.exists(acceptedQueriesReasoner.entails)
 //        acceptedQueriesReasoner.removeAxiomAndFlush(query)
-        configuration.ontologyReasoner.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
-        val inheritedDecline = declinedQueries.exists(configuration.ontologyReasoner.entails(acceptedQueriesABoxIndex, _))
-        configuration.ontologyReasoner.removeAxiomAndFlush(acceptedQueriesABoxIndex, query)
+        configuration.classificationOfInputOntology.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
+        val inheritedDecline = declinedQueries.exists(configuration.classificationOfInputOntology.entails(acceptedQueriesABoxIndex, _))
+        configuration.classificationOfInputOntology.removeAxiomAndFlush(acceptedQueriesABoxIndex, query)
         inheritedDecline
       } then
         nextDeclinedQueries += query
@@ -508,15 +508,15 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 //          acceptedQueriesReasoner.addAxiomAndFlush(query)
 //          val candidates = declinedQueries.filter(acceptedQueriesReasoner.entails)
 //          acceptedQueriesReasoner.removeAxiomAndFlush(query)
-          configuration.ontologyReasoner.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
-          val candidates = declinedQueries.filter(configuration.ontologyReasoner.entails(acceptedQueriesABoxIndex, _))
-          configuration.ontologyReasoner.removeAxiomAndFlush(acceptedQueriesABoxIndex, query)
+          configuration.classificationOfInputOntology.addAxiomAndFlush(acceptedQueriesABoxIndex, query)
+          val candidates = declinedQueries.filter(configuration.classificationOfInputOntology.entails(acceptedQueriesABoxIndex, _))
+          configuration.classificationOfInputOntology.removeAxiomAndFlush(acceptedQueriesABoxIndex, query)
     }: @nowarn
   }
 
   override def dispose(): Unit = {
 //    acceptedQueriesReasoner.dispose()
-    configuration.ontologyReasoner.unregisterABox(acceptedQueriesABoxIndex)
+    configuration.classificationOfInputOntology.unregisterABox(acceptedQueriesABoxIndex)
   }
 
 }
@@ -524,8 +524,8 @@ class Smart2UserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)
 /* This strategy is described in the KR 2022 paper. */
 class BestUserInteraction()(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager) extends UserInteraction() {
 
-  private val individuals = configuration.ontologyReasoner.instances(OWLThing)
-  private val atomicClassAssertions = individuals.flatMap(individual => configuration.ontologyReasoner.types(individual).filter(_.isAtom).map(atom => individual Type atom))
+  private val individuals = configuration.classificationOfInputOntology.instances(OWLThing)
+  private val atomicClassAssertions = individuals.flatMap(individual => configuration.classificationOfInputOntology.types(individual).filter(_.isAtom).map(atom => individual Type atom))
   private val repairTemplate = mutable.HashSet[Query]()
   private val particularizedRepairRequest = mutable.HashSet.from(configuration.request.negativeAxioms)
   private val tboxAxioms = configuration.ontology.getTBoxAxioms(Imports.INCLUDED).asScala
@@ -576,7 +576,7 @@ class BestUserInteraction()(using configuration: RepairConfiguration, ontologyMa
   }
 
   override protected def getRepairSeedUnchecked: RepairSeed = {
-    val seedAxioms = atomicClassAssertions.filter(axiom => (configuration.ontologyReasoner entails axiom) && !(templateReasoner entails axiom))
+    val seedAxioms = atomicClassAssertions.filter(axiom => (configuration.classificationOfInputOntology entails axiom) && !(templateReasoner entails axiom))
     RepairSeed(false, seedAxioms)
   }
 

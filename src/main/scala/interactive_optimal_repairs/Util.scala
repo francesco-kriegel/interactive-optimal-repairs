@@ -6,7 +6,13 @@ import interactive_optimal_repairs.OWLAPI5CodeConversion.*
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model.*
+import uk.ac.manchester.cs.owl.owlapi.concurrent.ConcurrentOWLOntologyImpl
+import uk.ac.manchester.cs.owl.owlapi.{InitVisitorFactory, Internals, MapPointer, OWLAxiomIndexImpl}
 
+import java.lang.reflect.{InvocationTargetException, Method}
+import java.util
+import java.util.stream.Stream
+import javax.annotation.ParametersAreNonnullByDefault
 import scala.jdk.CollectionConverters.*
 import scala.jdk.StreamConverters.*
 
@@ -27,14 +33,15 @@ object Util {
 
   implicit class ImplicitBoolean(b: Boolean) {
 
-    def implies(c: Boolean): Boolean = !b || c
+    /* The second argument `c` is only evaluated if needed, i.e., if the first argument `b` is true. */
+    def implies(c: => Boolean): Boolean = !b || c
 
   }
 
   class OWLSubClassOfAxiomReasonerRequest(subClassOfAxiom: OWLSubClassOfAxiom) {
 
-    def wrt(reasoner: ExtendedClassification): Boolean =
-      reasoner entails subClassOfAxiom
+    def wrt(classification: ExtendedClassification): Boolean =
+      classification entails subClassOfAxiom
 
   }
 
@@ -61,6 +68,9 @@ object Util {
     def topLevelConjuncts(): LazyList[OWLClassExpression] =
       classExpression.conjunctSet().toScala(LazyList).filter(_.isAtom)
 
+    def getTopLevelConjuncts: collection.Set[OWLClassExpression] =
+      classExpression.asConjunctSet().asScala.filter(_.isAtom)
+
     def isSubsumedBy(other: OWLClassExpression): OWLSubClassOfAxiomReasonerRequest =
       OWLSubClassOfAxiomReasonerRequest(classExpression SubClassOf other)
 
@@ -81,9 +91,9 @@ object Util {
 
     lazy val reduced: OWLClassExpression = {
       given ontologyManager: OWLOntologyManager = OWLManager.createOWLOntologyManager() // TODO
-      val reasoner = ExtendedClassification(Set.empty, classExpression.getNestedClassExpressions.asScala, true)
+      val classificationOfEmptyOntology = ExtendedClassification(Set.empty, classExpression.getNestedClassExpressions.asScala, true)
       val reduction =
-        if (classExpression subsumes OWLThing wrt reasoner)
+        if (classExpression subsumes OWLThing wrt classificationOfEmptyOntology)
           OWLThing
         else
           minimalElements(
@@ -91,9 +101,9 @@ object Util {
               case ObjectSomeValuesFrom(property, filler) => property some filler.reduced
               case c @ Class(_)                           => c
             },
-            reasoner.lteq
+            classificationOfEmptyOntology.lteq
           ) reduceLeft { _ and _ }
-      reasoner.dispose()
+      classificationOfEmptyOntology.dispose()
       reduction
     }
 
@@ -141,8 +151,8 @@ object Util {
 
   implicit class ImplicitOWLSubClassOfAxiom(subClassOfAxiom: OWLSubClassOfAxiom) {
 
-    def isEntailedBy(reasoner: ExtendedClassification): Boolean =
-      reasoner entails subClassOfAxiom
+    def isEntailedBy(classification: ExtendedClassification): Boolean =
+      classification entails subClassOfAxiom
 
     lazy val toDLString: String =
       subClassOfAxiom.getSubClass.toDLString + " ⊑ " + subClassOfAxiom.getSuperClass.toDLString
@@ -154,8 +164,8 @@ object Util {
 
   implicit class ImplicitOWLClassAssertionAxiom(classAssertion: OWLClassAssertionAxiom) {
 
-    def isEntailedBy(reasoner: ExtendedClassification): Boolean =
-      reasoner entails classAssertion
+    def isEntailedBy(classification: ExtendedClassification): Boolean =
+      classification entails classAssertion
 
     lazy val toDLString: String =
       classAssertion.getIndividual.toDLString + " : " + classAssertion.getClassExpression.toDLString
@@ -183,8 +193,8 @@ object Util {
 
   implicit class ImplicitOWLObjectPropertyAssertionAxiom(propertyAssertion: OWLObjectPropertyAssertionAxiom) {
 
-    def isEntailedBy(reasoner: ExtendedClassification): Boolean =
-      reasoner entails propertyAssertion
+    def isEntailedBy(classification: ExtendedClassification): Boolean =
+      classification entails propertyAssertion
 
     lazy val toDLString: String =
       propertyAssertion.getSubject.toDLString + " " + propertyAssertion.getProperty.toDLString + " " + propertyAssertion.getObject.toDLString
@@ -228,9 +238,9 @@ object Util {
 
   class CoverageReasonerRequest(classExpressions: Iterable[OWLClassExpression], others: Iterable[OWLClassExpression], strict: Boolean) {
 
-    def wrt(reasoner: ExtendedClassification): Boolean =
-      classExpressions.forall(c => others.exists(d => c isSubsumedBy d wrt reasoner))
-        && (strict implies !others.forall(c => classExpressions.exists(d => c isSubsumedBy d wrt reasoner)))
+    def wrt(classification: ExtendedClassification): Boolean =
+      classExpressions.forall(c => others.exists(d => c isSubsumedBy d wrt classification))
+        && (strict implies !others.forall(c => classExpressions.exists(d => c isSubsumedBy d wrt classification)))
 
   }
 
@@ -246,6 +256,89 @@ object Util {
         Some(individuals.head.asOWLNamedIndividual())
       else
         None
+
+  }
+
+  /**
+   * A class that encapsulates an instance of {@link org.semanticweb.owlapi.model.OWLOntology} and adds a further index
+   * mapping each instance of {@link org.semanticweb.owlapi.model.OWLIndividual} to the set of all instances of
+   * {@link org.semanticweb.owlapi.model.OWLObjectPropertyAssertionAxiom} in which it occurs in object position.
+   */
+  object AdditionallyIndexedOWLOntology {
+    /* Creating a new visitor that is not defined in uk.ac.manchester.cs.owl.owlapi.InitVisitorFactory */
+    private val INDIVIDUALSUPERNAMED = new AdditionallyIndexedOWLOntology.ConfigurableInitIndividualVisitor[OWLIndividual](false, true)
+
+    private class ConfigurableInitIndividualVisitor[K <: OWLObject](private val sub: Boolean, named: Boolean)
+      extends InitVisitorFactory.InitIndividualVisitor[K](sub, named) {
+      @SuppressWarnings(Array("unchecked"))
+      @ParametersAreNonnullByDefault
+      override def visit(axiom: OWLNegativeObjectPropertyAssertionAxiom): K =
+        if sub then axiom.getSubject.asInstanceOf[K] else axiom.getObject.asInstanceOf[K]
+
+      @SuppressWarnings(Array("unchecked"))
+      @ParametersAreNonnullByDefault
+      override def visit(axiom: OWLNegativeDataPropertyAssertionAxiom): K =
+        if sub then axiom.getSubject.asInstanceOf[K] else axiom.getObject.asInstanceOf[K]
+
+      @SuppressWarnings(Array("unchecked"))
+      @ParametersAreNonnullByDefault
+      override def visit(axiom: OWLObjectPropertyAssertionAxiom): K =
+        if sub then axiom.getSubject.asInstanceOf[K] else axiom.getObject.asInstanceOf[K]
+
+      @SuppressWarnings(Array("unchecked"))
+      @ParametersAreNonnullByDefault
+      override def visit(axiom: OWLDataPropertyAssertionAxiom): K =
+        if sub then axiom.getSubject.asInstanceOf[K] else axiom.getObject.asInstanceOf[K]
+    }
+  }
+
+  final class AdditionallyIndexedOWLOntology(private val ontology: OWLOntology) {
+
+    @transient private val objectPropertyAssertionsByObjectIndividual: MapPointer[OWLIndividual, OWLObjectPropertyAssertionAxiom] = {
+      try {
+        val intsField = classOf[OWLAxiomIndexImpl].getDeclaredField("ints")
+        intsField.setAccessible(true)
+        val ints =
+          if ontology.isInstanceOf[ConcurrentOWLOntologyImpl] then
+            val delegateField = classOf[ConcurrentOWLOntologyImpl].getDeclaredField("delegate")
+            delegateField.setAccessible(true)
+            intsField.get(delegateField.get(ontology).asInstanceOf[OWLOntology]).asInstanceOf[Internals]
+          else
+            intsField.get(ontology).asInstanceOf[Internals]
+        val buildLazyMethod = util.Arrays.stream(classOf[Internals].getDeclaredMethods).filter((method: Method) => method.getName == "buildLazy").findAny.get
+        buildLazyMethod.setAccessible(true)
+        buildLazyMethod.invoke(ints, AxiomType.OBJECT_PROPERTY_ASSERTION, AdditionallyIndexedOWLOntology.INDIVIDUALSUPERNAMED).asInstanceOf[MapPointer[OWLIndividual, OWLObjectPropertyAssertionAxiom]]
+      } catch {
+        case e@(_: NoSuchFieldException | _: IllegalAccessException | _: InvocationTargetException) =>
+          throw RuntimeException(e)
+      }
+    }: @SuppressWarnings(Array("unchecked"))
+
+    ontology.getOWLOntologyManager.addOntologyChangeListener(
+      _.stream.forEach((change: OWLOntologyChange) => {
+        if change.isAxiomChange(AxiomType.OBJECT_PROPERTY_ASSERTION) then
+          if change.isAddAxiom then
+            val axiom = change.getAddedAxiom.get.asInstanceOf[OWLObjectPropertyAssertionAxiom]
+            objectPropertyAssertionsByObjectIndividual.put(axiom.getObject, axiom)
+          else if change.isRemoveAxiom then
+            val axiom = change.getRemovedAxiom.get.asInstanceOf[OWLObjectPropertyAssertionAxiom]
+            objectPropertyAssertionsByObjectIndividual.remove(axiom.getObject, axiom)
+      }),
+      new SpecificOntologyChangeBroadcastStrategy(ontology)
+    )
+
+    def objectPropertyAssertionAxiomsWithSubject(individual: OWLIndividual): Stream[OWLObjectPropertyAssertionAxiom] = {
+      /* The OWLAPI already manages an index for the desired results, so there is no need to create a second one. */
+      ontology.getObjectPropertyAssertionAxioms(individual).stream()
+    }
+
+    def objectPropertyAssertionAxiomsWithObject(individual: OWLIndividual): Stream[OWLObjectPropertyAssertionAxiom] = {
+      objectPropertyAssertionsByObjectIndividual.getValues(individual).stream()
+    }
+
+    def getObjectPropertyAssertionAxiomsWithObject(individual: OWLIndividual): collection.Set[OWLObjectPropertyAssertionAxiom] = {
+      objectPropertyAssertionsByObjectIndividual.getValues(individual).asScala.toSet
+    }
 
   }
 

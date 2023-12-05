@@ -19,14 +19,14 @@ class RepairSeed(protected[interactive_optimal_repairs] val preprocessed: Boolea
   def getRepairType(individual: OWLNamedIndividual): RepairType = {
     repairTypes.getOrElseUpdate(individual, {
       if preprocessed
-      then RepairType(individual, getClassExpressions(individual))
+      then RepairType(KernelObject(individual), getClassExpressions(individual))
       else
         val atoms =
           maximalElements(
-            (getClassExpressions(individual) intersect configuration.ontologyReasoner.types(individual).toSet)
+            (getClassExpressions(individual) intersect configuration.classificationOfInputOntology.types(individual).toSet)
               .filter(_.isAtom),
-            _ isSubsumedBy _ wrt configuration.trivialReasoner)
-        val repairType = RepairType(individual, atoms)
+            _ isSubsumedBy _ wrt configuration.classificationOfEmptyOntology)
+        val repairType = RepairType(KernelObject(individual), atoms)
         if !repairType.isRepairType then throw RuntimeException("The provided axioms do not uniquely determine a repair seed.  Please check the code that instantiates this repair seed.")
         repairType
     })

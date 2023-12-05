@@ -10,7 +10,7 @@ import scala.jdk.CollectionConverters.*
 
 protected class RepairConfiguration(val ontology: OWLOntology,
                                     val request: RepairRequest,
-                                    val ontologyReasoner: ExtendedClassificationForMultipleABoxesWithSharedTBox)
+                                    val classificationOfInputOntology: ExtendedClassificationForMultipleABoxesWithSharedTBox)
                                    (using ontologyManager: OWLOntologyManager) {
 
   def this(ontology: OWLOntology, request: RepairRequest)(using ontologyManager: OWLOntologyManager) = {
@@ -52,17 +52,17 @@ protected class RepairConfiguration(val ontology: OWLOntology,
       conceptInclusionsMap.getOrElseUpdate(premise, { mutable.HashSet[OWLClassExpression]() }).add(conclusion)
   }
 
-  val trivialReasoner: ExtendedClassification = ExtendedClassification(Set.empty, subClassExpressions, true)
+  val classificationOfEmptyOntology: ExtendedClassification = ExtendedClassification(Set.empty, subClassExpressions, true)
 //  // TODO: Implement a variant of ELReasoner that supports multiple ABoxes with a shared TBox.
 //  val ontologyReasoner = ExtendedClassificationForMultipleABoxesWithSharedTBox(ontology, subClassExpressions, true)
-  ontologyReasoner.addClassExpressions(subClassExpressions)
-  ontologyReasoner.precomputeInferences()
+  classificationOfInputOntology.addClassExpressions(subClassExpressions)
+  classificationOfInputOntology.precomputeInferences()
 
   lazy val iqSaturation: IQSaturation = { given configuration: RepairConfiguration = this; IQSaturation() }
 
   def dispose(): Unit = {
-    trivialReasoner.dispose()
-    ontologyReasoner.dispose()
+    classificationOfEmptyOntology.dispose()
+    classificationOfInputOntology.dispose()
     conceptInclusionsMap.clear()
     conceptInclusions.clear()
   }

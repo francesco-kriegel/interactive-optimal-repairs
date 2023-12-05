@@ -109,11 +109,13 @@ object Util {
     def enableWithSingleAction(code: => Unit): Unit = {
       enableWithSingleActionListener(_ => { code })
     }
+  }
 
+  extension(component: JComponent) {
     def setFixedSize(size: Dimension): Unit = {
-      button.setMinimumSize(size)
-      button.setPreferredSize(size)
-      button.setMaximumSize(size)
+      component.setMinimumSize(size)
+      component.setPreferredSize(size)
+      component.setMaximumSize(size)
     }
   }
 

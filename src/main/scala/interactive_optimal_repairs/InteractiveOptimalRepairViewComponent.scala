@@ -453,9 +453,9 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                         userInteraction.getRepairSeed
                       } inParallelWith p.asynchronouslyInNewWorker("Checking if the input ontology is acyclic...") {
 //                        IQSaturation().isAcyclic
-                        repairConfiguration.iqSaturation.isAcyclic
+                        repairConfiguration.iqSaturation.hasAcyclicShell
                       } executeAndThen {
-                        (repairSeed, isAcyclic) => {
+                        (repairSeed, iqSaturationHasAcyclicShell) => {
                           nextButton.enableWithSingleAction {
                             /* State 3 */
                             nextButton.setEnabled(false)
@@ -484,19 +484,34 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                             })) // should be moved below setting the action listener for very fast users
 
                             panel.setLayout(BoxLayout(panel, BoxLayout.Y_AXIS))
-                            if isAcyclic then
-                              panel.add(JLabel(htmlParagraph("The input ontology is acyclic and thus the repairs are equal for all query languages that contain all queries in the repair request.")))
+//                            panel.add(JLabel(htmlParagraph("The input ontology is " + (if iqSaturationHasAcyclicShell then "" else "not") + " acyclic.")))
                             panel.add(JLabel(htmlParagraph("With respect to which query language should the repair be computed?")))
                             panel.add(Box.createRigidArea(Dimension(0, 8)))
                             panel.add(queryLanguageRadioButtonPanel)
+                            val spinnerNumberModel = SpinnerNumberModel(10, 0, null, 1)
+                            if !iqSaturationHasAcyclicShell then
+                              val label = JLabel(htmlParagraph("The CQ-repair is infinite.  Up to which depth should it be computed?"))
+                              val spinner = JSpinner(spinnerNumberModel)
+                              label.setEnabled(false)
+                              spinner.setEnabled(false)
+                              spinner.setFixedSize(Dimension(96,24))
+                              spinner.setAlignmentX(Component.LEFT_ALIGNMENT)
+//                              panel.add(Box(BoxLayout.LINE_AXIS)._add(label)._add(spinner))
+                              panel.add(label)
+                              panel.add(spinner)
+                              val cqButton = queryLanguageRadioButtons.find({ case (_, ql) => ql equals QueryLanguage.CQ }).get._1
+                              queryLanguageRadioButtons.foreach {
+                                case (button, _) =>
+                                  button.addActionListener(_ => {
+                                    label.setEnabled(cqButton.isSelected)
+                                    spinner.setEnabled(cqButton.isSelected)
+                                  })
+                              }
                             panel.add(Box.createRigidArea(Dimension(0,32)))
                             panel.add(JLabel(htmlParagraph("Should fresh named individuals be introduced instead of anonymous individuals?  Note that this has no impact on entailed queries, but can impair entailment with other (quantified) ABoxes.")))
                             panel.add(Box.createRigidArea(Dimension(0, 8)))
                             panel.add(compatibilityModeRadioButtonPanel)
                             panel.add(Box.createVerticalGlue())
-
-                            // queryLanguageRadioButtons.foreach { case (button, QueryLanguage.IRQ) => button.setSelected(true); case (button, _) => button.setEnabled(false) }
-                            queryLanguageRadioButtons.foreach { case (button, QueryLanguage.CQ) => button.setEnabled(false); case _ => }
 
                             panel.revalidate()
                             panel.repaint()
@@ -511,8 +526,9 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                               panel.repaint()
                               val queryLanguage = queryLanguageRadioButtons.keys.find(_.isSelected).map(queryLanguageRadioButtons).get
                               val compatibilityMode = compatibilityModeRadioButtons.keys.find(_.isSelected).map(compatibilityModeRadioButtons).get
+                              val depth = if iqSaturationHasAcyclicShell then None else Some(spinnerNumberModel.getNumber.intValue())
                               p.asynchronouslyInNewWorker("Computing the repair...") {
-                                Repair(queryLanguage, repairSeed).compute(compatibilityMode)
+                                Repair(queryLanguage, repairSeed).compute(compatibilityMode, depth)
                               } executeAndThen {
                                 repair => {
                                   nextButton.enableWithSingleActionListener(_ => {
