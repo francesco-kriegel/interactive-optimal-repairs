@@ -6,7 +6,7 @@ To use this plugin, do the following steps:
 3. Copy the jar file from `target` to the subfolder `plugins` of Protégé.
 4. Run Protégé and activate the new tab from the menu *Window* → *Tabs* → *Interactive Optimal Repair*.
 
-Instead of Steps 2 and 3, you can also download the bundle from https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.3/interactive-optimal-repairs-0.1.3.jar into the subfolder `plugins` of Protégé.
+Instead of Steps 2 and 3, you can also download the bundle from https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.4/interactive-optimal-repairs-0.1.4.jar into the subfolder `plugins` of Protégé.
 
 ### MacOS Installer Script
 
