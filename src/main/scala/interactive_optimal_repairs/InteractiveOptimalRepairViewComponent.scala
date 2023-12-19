@@ -13,7 +13,6 @@ import org.protege.editor.owl.ui.view.AbstractOWLViewComponent
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.Imports
-import sun.util.resources.Bundles.Strategy
 
 import java.awt.*
 //import java.awt.event.{WindowEvent, WindowListener}

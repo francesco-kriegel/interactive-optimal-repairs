@@ -3,7 +3,7 @@ package interactive_optimal_repairs
 
 import interactive_optimal_repairs.CompatibilityMode.*
 import interactive_optimal_repairs.QueryLanguage.*
-import interactive_optimal_repairs.Util.{ImplicitBoolean, ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression, Nominal}
+import interactive_optimal_repairs.Util.{ImplicitBoolean, ImplicitIterableOfOWLClassExpressions, ImplicitOWLClassExpression}
 
 import org.phenoscape.scowl.*
 import org.semanticweb.owlapi.model.*
