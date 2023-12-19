@@ -13,6 +13,7 @@ import org.protege.editor.owl.ui.view.AbstractOWLViewComponent
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model.*
 import org.semanticweb.owlapi.model.parameters.Imports
+import sun.util.resources.Bundles.Strategy
 
 import java.awt.*
 //import java.awt.event.{WindowEvent, WindowListener}
@@ -275,35 +276,35 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                 panel.revalidate()
                 panel.repaint()
                 nextButton.setSingleActionListener(_ => {
-                  /* State 1: Interaction Strategy */
-                  nextButton.setEnabled(false)
-                  panel.removeAll()
-//                  terminologyReasoner.dispose()
-//                  ontologyManager.removeOntology(terminology)
-//                  ontologyReasoner.dispose()
-                  reasoner.unregisterABox(emptyABoxIndex)
-                  val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(htmlParagraph("<b>" + s.name + "</b> (" + s.description + ")")), s)).toMap
-                  val strategyRadioButtonGroup = ButtonGroup()
-                  strategyRadioButtons.keys.foreach(strategyRadioButtonGroup.add)
-                  val strategyRadioButtonPanel = JPanel()
-                  strategyRadioButtonPanel.setLayout(BoxLayout(strategyRadioButtonPanel, BoxLayout.Y_AXIS))
-                  strategyRadioButtons.keys.foreach(strategyRadioButtonPanel.add)
-                  strategyRadioButtons.keys.foreach(b => b.addActionListener(_ => { if b.isSelected then nextButton.setEnabled(true) })) // should be moved below setting the action listener for very fast users
-
-                  val wantedConsequences = positiveRepairRequestAxiomList.stream().toScala(LazyList).toSet
-                  if wantedConsequences.nonEmpty then
-                    strategyRadioButtons.foreach {
-                      case (button, strategy) =>
-                        strategy match
-                          case Strategy.SMARTv2 => // Supported strategy
-                          case _ => button.setEnabled(false)
-                    }
-
-                  panel.add(breakingJLabel("Please select an interaction strategy."), BorderLayout.NORTH)
-                  panel.add(strategyRadioButtonPanel, BorderLayout.CENTER)
-                  panel.revalidate()
-                  panel.repaint()
-                  nextButton.setSingleActionListener(_ => {
+//                  /* State 1: Interaction Strategy */
+//                  nextButton.setEnabled(false)
+//                  panel.removeAll()
+////                  terminologyReasoner.dispose()
+////                  ontologyManager.removeOntology(terminology)
+////                  ontologyReasoner.dispose()
+//                  reasoner.unregisterABox(emptyABoxIndex)
+//                  val strategyRadioButtons = Strategy.values.map(s => (JRadioButton(htmlParagraph("<b>" + s.name + "</b> (" + s.description + ")")), s)).toMap
+//                  val strategyRadioButtonGroup = ButtonGroup()
+//                  strategyRadioButtons.keys.foreach(strategyRadioButtonGroup.add)
+//                  val strategyRadioButtonPanel = JPanel()
+//                  strategyRadioButtonPanel.setLayout(BoxLayout(strategyRadioButtonPanel, BoxLayout.Y_AXIS))
+//                  strategyRadioButtons.keys.foreach(strategyRadioButtonPanel.add)
+//                  strategyRadioButtons.keys.foreach(b => b.addActionListener(_ => { if b.isSelected then nextButton.setEnabled(true) })) // should be moved below setting the action listener for very fast users
+//
+//                  val wantedConsequences = positiveRepairRequestAxiomList.stream().toScala(LazyList).toSet
+//                  if wantedConsequences.nonEmpty then
+//                    strategyRadioButtons.foreach {
+//                      case (button, strategy) =>
+//                        strategy match
+//                          case Strategy.SMARTv2 => // Supported strategy
+//                          case _ => button.setEnabled(false)
+//                    }
+//
+//                  panel.add(breakingJLabel("Please select an interaction strategy."), BorderLayout.NORTH)
+//                  panel.add(strategyRadioButtonPanel, BorderLayout.CENTER)
+//                  panel.revalidate()
+//                  panel.repaint()
+//                  nextButton.setSingleActionListener(_ => {
                     /* State 2: User Interaction */
                     nextButton.setEnabled(false)
 
@@ -311,7 +312,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                     val unwantedConsequences = negativeRepairRequestAxiomList.stream().toScala(LazyList).toSet
                     val wantedConsequences = positiveRepairRequestAxiomList.stream().toScala(LazyList).toSet
                     val repairRequest = RepairRequest(unwantedConsequences, wantedConsequences)
-                    val strategy = strategyRadioButtons.keys.find(_.isSelected).map(strategyRadioButtons).get
+//                    val strategy = strategyRadioButtons.keys.find(_.isSelected).map(strategyRadioButtons).get
 
                     p.asynchronouslyInNewWorker("Generating the repair configuration and updating the reasoner...") {
                       RepairConfiguration(activeOntology, repairRequest, reasoner)
@@ -322,7 +323,8 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                       onDisposal {
                         repairConfiguration.dispose()
                       }
-                      val userInteraction = UserInteraction(strategy)
+//                      val userInteraction = UserInteraction(strategy)
+                      val userInteraction = SmartUserInteraction()
 
                       def lock(list: OrderedOWLAxiomList[Query]): Unit = {
                         list.isEditable = false
@@ -550,7 +552,7 @@ class InteractiveOptimalRepairViewComponent extends AbstractOWLViewComponent {
                         }
                       }
                     }
-                  })
+//                  })
                 })
               })
             }

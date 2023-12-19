@@ -7,5 +7,5 @@ import org.semanticweb.owlapi.model.{OWLClassAssertionAxiom, OWLObjectPropertyAs
 type Query = OWLClassAssertionAxiom | OWLObjectPropertyAssertionAxiom
 
 enum QueryLanguage {
-  case IQ, IRQ, CQ
+  case IRQ, CQ
 }

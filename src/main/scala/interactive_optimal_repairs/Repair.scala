@@ -23,7 +23,6 @@ object Repair {
 
   def apply(queryLanguage: QueryLanguage, seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager): Repair = {
     queryLanguage match
-      case IQ => IQRepair(seed, saturated)
       case IRQ => IRQRepair(seed, saturated)
       case CQ => CQRepair(seed, saturated)
   }
@@ -54,8 +53,8 @@ trait Repair(protected val seed: RepairSeed, protected val saturated: Boolean = 
 
 }
 
-private class IQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
-  extends Repair(iqSeed, saturated) {
+private class IRQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
+  extends Repair(seed, saturated) {
 
   lazy val isFinite: Boolean = true
 
@@ -124,30 +123,8 @@ private class IQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using conf
 
 }
 
-private def extendRepairSeedWithTheUnwantedRoleAssertions(seed: RepairSeed)(using configuration: RepairConfiguration) = {
-
-  val newAxioms = mutable.HashSet.from[OWLClassAssertionAxiom](seed.axioms)
-  configuration.request.negativeAxioms foreach {
-    case ObjectPropertyAssertion(_, property@ObjectProperty(_), subject@NamedIndividual(_), target@NamedIndividual(_)) =>
-      // newAxioms += (subject Type (property some Nominal(target))) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-      val nominal = Nominal(target)
-      val successor = property some nominal
-      newAxioms += (subject Type successor) // standard translation of role assertions into class assertions, as used in the KR 2022 paper
-      configuration.classificationOfEmptyOntology.addClassExpression(nominal)
-      configuration.classificationOfEmptyOntology.addClassExpression(successor)
-      configuration.classificationOfInputOntology.addClassExpression(nominal)
-      configuration.classificationOfInputOntology.addClassExpression(successor)
-    case _ => // Do nothing.
-  }
-  RepairSeed(seed.preprocessed, newAxioms)
-
-}
-
-private class IRQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
-  extends IQRepair(extendRepairSeedWithTheUnwantedRoleAssertions(iqSeed), saturated) {}
-
-private class CQRepair(iqSeed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
-  extends Repair(extendRepairSeedWithTheUnwantedRoleAssertions(iqSeed), saturated) {
+private class CQRepair(seed: RepairSeed, saturated: Boolean = true)(using configuration: RepairConfiguration, ontologyManager: OWLOntologyManager)
+  extends Repair(seed, saturated) {
 
   private lazy val cqSaturation = if saturated then CQSaturation() else NoCQSaturation()
   lazy val isFinite: Boolean = saturated implies configuration.iqSaturation.hasAcyclicShell

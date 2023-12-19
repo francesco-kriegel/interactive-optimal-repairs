@@ -142,7 +142,7 @@ object RepairType {
       Console.err.println("Individual: " + node)
       Console.err.println("To be covered: " + classExpressionsToBeCovered)
       Console.err.println("Types: " + types)
-      throw IllegalArgumentException() // sanity check, could be removed
+      throw IllegalArgumentException() // TODO: sanity check, could be removed
     val filteredClassExpressionsToBeCovered = classExpressionsToBeCovered intersect types
     var preTypes = mutable.HashSet(
       filteredClassExpressionsToBeCovered ++ filteredClassExpressionsToBeCovered.flatMap(premises(node, _)))

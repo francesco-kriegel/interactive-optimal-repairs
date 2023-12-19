@@ -35,7 +35,7 @@ ThisBuild / assemblyMergeStrategy := {
 
 Compile / mainClass := Some("de.tu_dresden.inf.lat.interactive_optimal_repairs.Main")
 
-scalacOptions += "-Xfatal-warnings"
+scalacOptions += "-Werror"
 scalacOptions += "-deprecation"
 
 // Generate the bundled jar with the command "sbt osgiBundle"
