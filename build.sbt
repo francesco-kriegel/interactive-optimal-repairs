@@ -1,6 +1,6 @@
 
 ThisBuild / organization := "de.tu_dresden.inf.lat"
-ThisBuild / version := "0.1.5-SNAPSHOT"
+ThisBuild / version := "0.1.6-SNAPSHOT"
 
 ThisBuild / scalaVersion := "3.3.1"
 

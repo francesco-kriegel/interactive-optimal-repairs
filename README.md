@@ -15,5 +15,5 @@ At the end of executing the installer script, Protégé including this plugin is
 5. If you want to work with large ontologies, then increase the memory limit of Protégé by adding the line `max_heap_size=16G` to the file `conf/jvm.conf` of Protégé (from Step 1).
 6. Run Protégé and activate the new tab from the menu *Window* → *Tabs* → *Interactive Optimal Repair* (tested with GraalVM 21.0.1+12.1).
 
-Instead of Steps 2-4, you can also download the bundle from https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.4/interactive-optimal-repairs-0.1.4.jar into the subfolder `plugins` of Protégé.
+Instead of Steps 2-4, you can also download the bundle from https://github.com/francesco-kriegel/interactive-optimal-repairs/releases/download/v0.1.5/interactive-optimal-repairs-0.1.5.jar into the subfolder `plugins` of Protégé.
 
