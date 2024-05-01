@@ -19,7 +19,7 @@ private abstract class ProtegeWorker[T, V] extends SwingWorker[T, V] with Backgr
         case SwingWorker.StateValue.DONE => ProtegeApplication.getBackgroundTaskManager.endTask(this)
   })
 
-  var message: String = ""
+  @volatile var message: String = ""
 
   override def toString: String = message
 

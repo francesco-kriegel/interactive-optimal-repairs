@@ -145,6 +145,14 @@ class SmartUserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(
 //        false,
 //        true)
     ontologyManager.addAxioms(unsaturatedRepairComputed, acceptedQueries.asJava)
+//    println("Unsaturated repair:")
+//    import de.tu_dresden.inf.lat.interactive_optimal_repairs.Util. ImplicitOWLClassAssertionAxiom
+//    import de.tu_dresden.inf.lat.interactive_optimal_repairs.Util. ImplicitOWLObjectPropertyAssertionAxiom
+//    unsaturatedRepairComputed.getAxioms.asScala.foreach {
+//      case axiom: OWLClassAssertionAxiom => println(axiom.toShortDLString)
+//      case axiom: OWLObjectPropertyAssertionAxiom => println(axiom.toShortDLString)
+//      case _ => // Do nothing.
+//    }
     val unsaturatedRepairABoxIndex = configuration.classificationOfInputOntology.registerABox(unsaturatedRepairComputed, true)
     for {
       individual <- configuration.ontology.getIndividualsInSignature(Imports.INCLUDED).asScala
@@ -152,6 +160,10 @@ class SmartUserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(
       classExpression <- configuration.classificationOfInputOntology.types(individual).filter(_.isAtom)
     }
       val query = individual Type classExpression
+//      println("Phase 2 init: " + query.toShortDLString)
+//      println("-- not explicitly decided: " + isUndecided(query))
+//      println("-- entailed by sat. repair: " + (saturatedRepairVirtual entails query))
+//      println("-- entailed by unsat. repair: " + configuration.classificationOfInputOntology.entails(unsaturatedRepairABoxIndex, query))
 //      if isUndecided(query) && (saturatedRepair entails query) && !(unsaturatedRepairReasoner entails query) then
       if isUndecided(query) && (saturatedRepairVirtual entails query) && !configuration.classificationOfInputOntology.entails(unsaturatedRepairABoxIndex, query) then
         pendingQueries += query
@@ -200,8 +212,8 @@ class SmartUserInteraction(val inheritedAnswersMustBeConfirmed: Boolean = true)(
       val nextDeclinedQueries = mutable.HashSet[Query]()
       currentDeclinedQueries.foreach {
         case query@ClassAssertion(_, classExpression, individual) =>
+          declinedQueries += query
           if classExpression.isAtom then
-            declinedQueries += query
             if inheritedDecline then
               if inheritedAnswersMustBeConfirmed then
                 inheritedAnswers(query) = INHERITED_DECLINE
